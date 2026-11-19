@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+/* Cores e fonte da HealthIA. Nomes pelo uso, não pela aparência. */
+@theme {
+  --font-sans: "Inter Variable", "Inter", system-ui, sans-serif;
+
+  --color-marca: #142d4e;
+  --color-marca-escura: #0e2038;
+  --color-marca-suave: #1f3d63;
+  --color-destaque: #187c80;
+  --color-destaque-escuro: #0f5c5f;
+  --color-destaque-claro: #5cc6ca;
+  --color-destaque-fundo: #e6f2f2;
+
+  --color-superficie: #f4f7fa;
+  --color-borda: #d5dee9;
+  --color-borda-campo: #76879e;
+  --color-texto-suave: #4a5a70;
+  --color-texto-sobre-marca: #e3edf8;
+  --color-texto-sobre-marca-suave: #b9c7da;
+
+  --color-erro: #b42318;
+  --color-erro-fundo: #fef3f2;
+
+  /* Curva de saída forte para UI (skill animate). Gera a classe ease-saida. */
+  --ease-saida: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/*
+ * Animações (skills animate e choreograph): só transform e opacity, curva
+ * ease-saida, atraso por elemento em --atraso, fill-mode "both" para nada
+ * piscar no estado final antes da hora.
+ */
+@keyframes surgir {
+  from {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+}
+
+@keyframes surgir-curto {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes surgir-aviso {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes aparecer {
+  from {
+    opacity: 0;
+  }
+}
+
+@layer components {
+  /* Palavra da frase principal (líder da coreografia). */
+  .entrada-palavra {
+    display: inline-block;
+    animation: surgir 600ms var(--ease-saida) both;
+    animation-delay: var(--atraso, 0ms);
+  }
+
+  /* Bloco que entra inteiro, como uma unidade (apoio). */
+  .entrada-bloco {
+    animation: surgir-curto 450ms var(--ease-saida) both;
+    animation-delay: var(--atraso, 0ms);
+  }
+
+  /* Decoração: só aparece, sem movimento. */
+  .entrada-suave {
+    animation: aparecer 400ms var(--ease-saida) both;
+    animation-delay: var(--atraso, 0ms);
+  }
+
+  /* Retorno a uma ação do usuário (mensagem de erro). */
+  .entrada-aviso {
+    animation: surgir-aviso 200ms var(--ease-saida) both;
+  }
+
+  .entrada-erro-campo {
+    animation: aparecer 150ms var(--ease-saida) both;
+  }
+
+  /* Botão pressionado: retorno imediato de que o clique foi recebido. */
+  .pressionavel {
+    transition: transform 150ms var(--ease-saida);
+  }
+  .pressionavel:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  /* Reduzir movimento: a coreografia vira um só aparecimento suave, sem atraso. */
+  @media (prefers-reduced-motion: reduce) {
+    .entrada-palavra,
+    .entrada-bloco,
+    .entrada-suave,
+    .entrada-aviso {
+      animation-name: aparecer;
+      animation-delay: 0ms;
+    }
+    .pressionavel:active:not(:disabled) {
+      transform: none;
+    }
+  }
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-borda, currentColor);
+  }
+
+  body {
+    @apply bg-superficie font-sans text-marca antialiased;
+  }
+}
