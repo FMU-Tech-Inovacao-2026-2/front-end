@@ -21,6 +21,11 @@
 
   --color-erro: #b42318;
   --color-erro-fundo: #fef3f2;
+  --color-atencao: #8a4b00;
+  --color-atencao-borda: #f2c46d;
+  --color-atencao-fundo: #fff8eb;
+  --color-sucesso: #116a3e;
+  --color-sucesso-fundo: #ecf8f1;
 
   /* Curva de saída forte para UI (skill animate). Gera a classe ease-saida. */
   --ease-saida: cubic-bezier(0.23, 1, 0.32, 1);
@@ -58,6 +63,32 @@
   }
 }
 
+/* Botão pressionado: retorno imediato de que o clique foi recebido. */
+@utility pressionavel {
+  transition: transform 150ms var(--ease-saida);
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &:active:not(:disabled) {
+      transform: none;
+    }
+  }
+}
+
+/* Anel de foco padrão (WCAG 2.4.7): visível só na navegação por teclado. */
+@utility foco {
+  &:focus-visible {
+    outline: 2px solid transparent;
+    box-shadow: 0 0 0 2px #fff, 0 0 0 5px color-mix(in oklab, var(--color-destaque) 55%, transparent);
+  }
+}
+
+/* Botões. Alvo mínimo de 44 px (WCAG 2.5.8). */
+@utility botao {
+  @apply pressionavel foco inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-5 text-[0.9375rem] font-semibold disabled:cursor-not-allowed disabled:opacity-55;
+}
+
 @layer components {
   /* Palavra da frase principal (líder da coreografia). */
   .entrada-palavra {
@@ -87,12 +118,24 @@
     animation: aparecer 150ms var(--ease-saida) both;
   }
 
-  /* Botão pressionado: retorno imediato de que o clique foi recebido. */
-  .pressionavel {
-    transition: transform 150ms var(--ease-saida);
+  .botao-primario {
+    @apply botao bg-marca text-white hover:bg-marca-escura;
   }
-  .pressionavel:active:not(:disabled) {
-    transform: scale(0.97);
+  .botao-secundario {
+    @apply botao border border-borda-campo bg-white text-marca hover:bg-superficie;
+  }
+  .botao-discreto {
+    @apply botao px-3 text-destaque-escuro hover:bg-destaque-fundo;
+  }
+
+  .cartao {
+    @apply rounded-xl border bg-white;
+  }
+
+  /* Trecho de origem destacado dentro do sumário original. */
+  .trecho-destacado {
+    @apply rounded-sm bg-destaque-claro/45 px-0.5 text-marca;
+    box-decoration-break: clone;
   }
 
   /* Reduzir movimento: a coreografia vira um só aparecimento suave, sem atraso. */
@@ -104,9 +147,15 @@
       animation-name: aparecer;
       animation-delay: 0ms;
     }
-    .pressionavel:active:not(:disabled) {
-      transform: none;
-    }
+  }
+}
+
+@media print {
+  .nao-imprimir {
+    display: none !important;
+  }
+  body {
+    background: white;
   }
 }
 

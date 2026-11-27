@@ -1,0 +1,55 @@
+# Lint, testes, build (com checagem de tipos) e imagem Docker do front-end.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web (lint + testes + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    name: Imagem Docker
+    runs-on: ubuntu-latest
+    needs: web
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: healthia-web:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Sobe a imagem e confere config.js e CSP
+        run: |
+          docker run -d --name web -p 8080:8080 -e HEALTHIA_API_URL=https://api.exemplo.invalid healthia-web:ci
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8080/config.js | tee /dev/stderr | grep -q '"modo": "backend"'
+          curl -fsSI http://127.0.0.1:8080/ | tee /dev/stderr | grep -qi "connect-src 'self' https://api.exemplo.invalid"
+          curl -fsS http://127.0.0.1:8080/alta/novo | grep -q '<div id="root">'

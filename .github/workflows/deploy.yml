@@ -1,0 +1,76 @@
+# Deploy do front-end no Cloud Run. Roda depois do CI verde na main, ou manualmente.
+# Fica inativo até as variáveis do repositório serem configuradas.
+# Guia completo: https://github.com/FMU-Tech-Inovacao-2026-2/pitchInicial/blob/main/docs/deploy.md
+name: Deploy Cloud Run
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # Workload Identity Federation: token OIDC de curta duração, sem chave JSON.
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+env:
+  SERVICO: ${{ vars.CLOUD_RUN_SERVICO_WEB || 'healthia-web' }}
+  REGIAO: ${{ vars.GCP_REGION || 'southamerica-east1' }}
+  IMAGEM: ${{ vars.GCP_REGION || 'southamerica-east1' }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REPO || 'healthia' }}/web:${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  deploy:
+    name: Build, push e deploy
+    if: vars.GCP_PROJECT_ID != '' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: producao
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build e push da imagem
+        run: |
+          gcloud auth configure-docker "${REGIAO}-docker.pkg.dev" --quiet
+          docker build -t "$IMAGEM" .
+          docker push "$IMAGEM"
+
+      - name: Deploy
+        env:
+          API_URL: ${{ vars.HEALTHIA_API_URL }}
+          MODO: ${{ vars.HEALTHIA_MODO || 'backend' }}
+          RUNTIME_SA: ${{ vars.GCP_RUNTIME_SA_WEB || vars.GCP_RUNTIME_SA }}
+        run: |
+          if [ "$MODO" = backend ] && [ -z "$API_URL" ]; then
+            echo "Defina HEALTHIA_API_URL com a URL da API, ou HEALTHIA_MODO=demonstracao."; exit 1
+          fi
+          gcloud run deploy "$SERVICO" \
+            --image "$IMAGEM" \
+            --region "$REGIAO" \
+            --service-account "$RUNTIME_SA" \
+            --allow-unauthenticated \
+            --port 8080 \
+            --min-instances 0 \
+            --max-instances 3 \
+            --memory 256Mi \
+            --set-env-vars "^@^HEALTHIA_MODO=${MODO}@HEALTHIA_API_URL=${API_URL}"
+
+      - name: Confere a página
+        run: |
+          URL=$(gcloud run services describe "$SERVICO" --region "$REGIAO" --format 'value(status.url)')
+          echo "Front-end: $URL" >> "$GITHUB_STEP_SUMMARY"
+          curl -fsS "$URL/healthz"
+          curl -fsS "$URL/config.js"

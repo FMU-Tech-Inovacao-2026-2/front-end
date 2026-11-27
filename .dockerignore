@@ -1,0 +1,16 @@
+# Segredos e configuração local: nunca entram na imagem (um .env.* entraria no bundle do Vite).
+**/.env
+**/.env.*
+!.env.example
+
+# Git, editores e ferramentas locais
+.git
+.github
+.claude
+.vscode
+.idea
+
+# Dependências e saídas locais (a imagem instala e compila do zero)
+node_modules
+dist
+*.log

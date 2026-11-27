@@ -1,0 +1,39 @@
+# Servidor estático do HealthIA (SPA). Gerado por envsubst na inicialização:
+# só as variáveis definidas no ambiente (ex.: HEALTHIA_API_ORIGIN) são trocadas.
+server {
+    listen       8080;
+    server_name  _;
+    root         /usr/share/nginx/html;
+    index        index.html;
+    server_tokens off;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    # Checagem simples para orquestradores.
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Arquivos com hash no nome: cache longo.
+    location /assets/ {
+        include /etc/nginx/conf.d/seguranca.inc;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+
+    # Configuração de execução e página inicial: sempre atualizadas.
+    location = /config.js {
+        include /etc/nginx/conf.d/seguranca.inc;
+        add_header Cache-Control "no-store" always;
+    }
+
+    location / {
+        include /etc/nginx/conf.d/seguranca.inc;
+        add_header Cache-Control "no-cache" always;
+        try_files $uri /index.html;
+    }
+}

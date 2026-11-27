@@ -1,153 +1,132 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { Rotas } from '../../App'
-import type { ApiAlta, NovaExtracao } from '../../api/alta'
 import { ApiProvider } from '../../api/ApiProvider'
-import { ErroApi } from '../../api/erros'
+import type { ApiAlta } from '../../api/alta'
+import { criarApiAltaDemonstracao } from '../../api/demonstracao'
 import { AuthProvider } from '../../auth/AuthProvider'
 import type { ClienteAuth, Perfil } from '../../auth/tipos'
+import { criarApiAltaFalsa, PACIENTE_TESTE } from '../../test/altaFixtures'
 
-const PACIENTE_A = { id: '11111111-1111-4111-8111-111111111111', nome: 'Paciente fictício A', email: 'a@demo' }
-
-/** Login falso já entrado com o perfil pedido. */
-function loginFalso(perfil: Perfil): ClienteAuth & { saiu: boolean } {
-  let logado = true
-  const cliente = {
-    saiu: false,
-    modoDemonstracao: false,
-    entrarComSenha: async () => ({ ok: false as const, mensagem: 'não usado' }),
-    entrarDemonstracao: async () => ({ ok: false as const, mensagem: 'não usado' }),
-    usuarioAtual: async () => (logado ? { email: `${perfil}@exemplo.com`, perfil } : null),
-    tokenAtual: async () => (logado ? 'token' : null),
-    sair: async () => {
-      logado = false
-      cliente.saiu = true
-    },
+function loginFalso(perfil: Perfil, modoDemonstracao = false): ClienteAuth {
+  return {
+    modoDemonstracao,
+    entrarComSenha: async () => ({ ok: false, mensagem: 'não usado' }),
+    entrarDemonstracao: async () => ({ ok: false, mensagem: 'não usado' }),
+    usuarioAtual: async () => ({ email: `${perfil}@exemplo.test`, perfil }),
+    tokenAtual: async () => 'token-teste',
+    sair: async () => undefined,
   }
-  return cliente
 }
 
-/** API falsa: guarda o que recebeu e responde o que o teste mandar. */
-function apiFalsa(resposta: () => Promise<{ id: string; status: 'pendente' }> = async () => ({ id: 'ext-1', status: 'pendente' })) {
-  const chamadas: NovaExtracao[] = []
-  const api: ApiAlta = {
-    listarPacientes: async () => [PACIENTE_A],
-    criarExtracao: async (dados) => {
-      chamadas.push(dados)
-      return resposta()
-    },
-  }
-  return { api, chamadas }
-}
-
-function abrir(caminho: string, perfil: Perfil = 'profissional', api: ApiAlta = apiFalsa().api) {
-  const login = loginFalso(perfil)
+function abrir(api: ApiAlta, { perfil = 'profissional', demo = false, caminho = '/alta/novo' }: { perfil?: Perfil; demo?: boolean; caminho?: string } = {}) {
+  const usuario = userEvent.setup()
   render(
-    <AuthProvider cliente={login}>
+    <AuthProvider cliente={loginFalso(perfil, demo)}>
       <ApiProvider apis={{ alta: api }}>
-        <MemoryRouter initialEntries={[caminho]}>
-          <Rotas />
-        </MemoryRouter>
+        <MemoryRouter initialEntries={[caminho]}><Rotas /></MemoryRouter>
       </ApiProvider>
     </AuthProvider>,
   )
-  return { usuario: userEvent.setup(), login }
+  return usuario
 }
 
-describe('Envio do sumário de alta', () => {
-  test('enviar vazio mostra os erros de paciente e de texto e leva o foco ao primeiro', async () => {
-    const { usuario } = abrir('/alta/novo')
+afterEach(() => vi.unstubAllGlobals())
 
-    await usuario.click(await screen.findByRole('button', { name: 'Extrair plano' }))
+describe('Entrada do Alta Assistida', () => {
+  test('oferece sumário da base, importação de arquivo e texto digitado', async () => {
+    const { api } = criarApiAltaFalsa()
+    abrir(api)
 
-    expect(screen.getByLabelText('Paciente')).toHaveAccessibleDescription('Escolha o paciente.')
-    expect(screen.getByLabelText('Texto do sumário de alta')).toHaveAccessibleDescription(
-      expect.stringContaining('Cole o texto do sumário de alta.'),
-    )
-    expect(screen.getByLabelText('Paciente')).toHaveFocus()
+    expect(await screen.findByLabelText('Sumários fictícios disponíveis')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Importar arquivo/ })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Digitar texto/ })).toBeInTheDocument()
   })
 
-  test('texto só com espaços é recusado e não chama a API', async () => {
-    const { api, chamadas } = apiFalsa()
-    const { usuario } = abrir('/alta/novo', 'profissional', api)
+  test('envia da base ao back-end e abre a etapa de sugestões da IA', async () => {
+    const { api, chamadas } = criarApiAltaFalsa()
+    const usuario = abrir(api)
 
-    await usuario.selectOptions(await screen.findByLabelText('Paciente'), await screen.findByRole('option', { name: 'Paciente fictício A' }))
-    await usuario.type(screen.getByLabelText('Texto do sumário de alta'), '     ')
-    await usuario.click(screen.getByRole('button', { name: 'Extrair plano' }))
+    await usuario.click(await screen.findByRole('button', { name: 'Extrair com IA' }))
 
-    expect(screen.getByLabelText('Texto do sumário de alta')).toHaveFocus()
-    expect(screen.getByLabelText('Texto do sumário de alta')).toHaveAccessibleDescription(
-      expect.stringContaining('Cole o texto do sumário de alta.'),
-    )
+    expect(await screen.findByRole('heading', { name: 'Sugestões da IA' })).toBeInTheDocument()
+    expect(screen.getByText('Furosemida 40 mg')).toBeInTheDocument()
+    expect(chamadas).toEqual([{ origem: 'base', paciente_id: PACIENTE_TESTE.id, sumario_id: 'sumario-teste' }])
+  })
+
+  test('lê arquivo TXT e envia seu texto como entrada de arquivo', async () => {
+    const { api, chamadas } = criarApiAltaFalsa()
+    const usuario = abrir(api)
+    const arquivo = new File(['Sumário fictício importado'], 'alta-ficticia.txt', { type: 'text/plain' })
+
+    await usuario.click(await screen.findByRole('radio', { name: /Importar arquivo/ }))
+    await usuario.upload(screen.getByLabelText('Arquivo do sumário (.txt ou PDF)'), arquivo)
+    expect(await screen.findByText('Arquivo lido: alta-ficticia.txt')).toBeInTheDocument()
+    await usuario.click(screen.getByRole('button', { name: 'Extrair com IA' }))
+
+    expect(await screen.findByRole('heading', { name: 'Sugestões da IA' })).toBeInTheDocument()
+    expect(chamadas).toEqual([{ origem: 'arquivo', paciente_id: PACIENTE_TESTE.id, nome_arquivo: 'alta-ficticia.txt', texto: 'Sumário fictício importado' }])
+  })
+
+  test('texto vazio no modo API não chama o back-end', async () => {
+    const { api, chamadas } = criarApiAltaFalsa()
+    const usuario = abrir(api)
+    await usuario.click(await screen.findByRole('radio', { name: /Digitar texto/ }))
+    await usuario.click(screen.getByRole('button', { name: 'Extrair com IA' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Digite o texto do sumário.')
     expect(chamadas).toHaveLength(0)
   })
 
-  test('envio válido manda o texto sem espaços nas pontas e abre a extração', async () => {
-    const { api, chamadas } = apiFalsa()
-    const { usuario } = abrir('/alta/novo', 'profissional', api)
+  test('texto digitado é enviado como texto e não é modificado', async () => {
+    const { api, chamadas } = criarApiAltaFalsa()
+    const usuario = abrir(api)
+    await usuario.click(await screen.findByRole('radio', { name: /Digitar texto/ }))
+    await usuario.type(screen.getByLabelText('Texto do sumário de alta'), '  Sumário fictício colado.  ')
+    await usuario.click(screen.getByRole('button', { name: 'Extrair com IA' }))
 
-    await usuario.selectOptions(await screen.findByLabelText('Paciente'), await screen.findByRole('option', { name: 'Paciente fictício A' }))
-    await usuario.type(screen.getByLabelText('Texto do sumário de alta'), '  Furosemida 40 mg VO 1x/dia.  ')
-    await usuario.click(screen.getByRole('button', { name: 'Extrair plano' }))
-
-    expect(await screen.findByRole('heading', { name: 'Revisão: próxima tarefa' })).toBeInTheDocument()
-    expect(chamadas).toEqual([{ paciente_id: PACIENTE_A.id, texto: 'Furosemida 40 mg VO 1x/dia.' }])
+    expect(await screen.findByRole('heading', { name: 'Sugestões da IA' })).toBeInTheDocument()
+    expect(chamadas).toEqual([{ origem: 'texto', paciente_id: PACIENTE_TESTE.id, texto: 'Sumário fictício colado.' }])
   })
 
-  async function preencherEEnviar(usuario: ReturnType<typeof userEvent.setup>) {
-    await usuario.selectOptions(await screen.findByLabelText('Paciente'), await screen.findByRole('option', { name: 'Paciente fictício A' }))
-    await usuario.type(screen.getByLabelText('Texto do sumário de alta'), 'Sumário fictício')
-    await usuario.click(screen.getByRole('button', { name: 'Extrair plano' }))
-  }
+  test('demonstração percorre o fluxo completo com as mesmas travas do servidor e sem fetch', async () => {
+    sessionStorage.clear()
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    const apiDemo = criarApiAltaDemonstracao()
+    const usuario = abrir(apiDemo, { demo: true })
 
-  test('erro da API mostra a mensagem recebida e deixa tentar de novo', async () => {
-    const { api } = apiFalsa(async () => {
-      throw new ErroApi('ia_indisponivel', 'A IA não respondeu. Tente de novo em instantes.', 502)
-    })
-    const { usuario } = abrir('/alta/novo', 'profissional', api)
+    expect(await screen.findByText('Demonstração guiada')).toBeInTheDocument()
+    await usuario.click(await screen.findByRole('button', { name: 'Gerar sugestões' }))
+    expect(await screen.findByRole('heading', { name: 'Sugestões da IA' })).toBeInTheDocument()
 
-    await preencherEEnviar(usuario)
+    // O erro proposital da IA aparece bloqueado.
+    expect(screen.getByText('1 sugestão tem citação que não existe no sumário')).toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'Enalapril 10 mg à noite' })).toHaveTextContent('Origem não confirmada')
+    await usuario.click(screen.getByRole('button', { name: 'Aceitar as que têm origem confirmada' }))
+    await usuario.click(screen.getByRole('button', { name: 'Ir para revisão final' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('A IA não respondeu. Tente de novo em instantes.')
-    expect(screen.getByRole('button', { name: 'Extrair plano' })).toBeEnabled()
+    expect(await screen.findByRole('heading', { name: 'Revisão final e aceite profissional' })).toBeInTheDocument()
+    for (const caixa of screen.getAllByRole('checkbox')) await usuario.click(caixa)
+    await usuario.click(screen.getByRole('button', { name: 'Aprovar e liberar para o paciente' }))
+
+    expect(await screen.findByRole('heading', { name: 'Plano aprovado' })).toBeInTheDocument()
+    const plano = await apiDemo.meuPlano()
+    expect(plano?.itens).toHaveLength(5)
+    expect(plano?.itens.every((item) => item.origem_verificada)).toBe(true)
+    expect(plano?.aceite?.declaracoes).toHaveLength(4)
+    expect(fetch).not.toHaveBeenCalled()
   })
 
-  test('resposta 401 encerra a sessão e leva para o login', async () => {
-    const { api } = apiFalsa(async () => {
-      throw new ErroApi('sessao_expirada', 'Sua sessão expirou. Entre de novo.', 401)
-    })
-    const { usuario, login } = abrir('/alta/novo', 'profissional', api)
+  test('demonstração recusa texto livre como o servidor sem IA configurada', async () => {
+    sessionStorage.clear()
+    const usuario = abrir(criarApiAltaDemonstracao(), { demo: true })
+    await usuario.click(await screen.findByRole('radio', { name: /Digitar texto/ }))
+    await usuario.type(screen.getByLabelText('Texto do sumário de alta'), 'Texto fictício qualquer.')
+    await usuario.click(screen.getByRole('button', { name: 'Gerar sugestões' }))
 
-    await preencherEEnviar(usuario)
-
-    expect(await screen.findByRole('heading', { name: 'Entrar na HealthIA' })).toBeInTheDocument()
-    expect(login.saiu).toBe(true)
-  })
-
-  test('se a lista de pacientes não carregar, avisa e oferece tentar de novo', async () => {
-    let tentativas = 0
-    const api: ApiAlta = {
-      listarPacientes: async () => {
-        tentativas += 1
-        if (tentativas === 1) throw new ErroApi('nao_encontrado', 'Recurso não encontrado.', 404)
-        return [PACIENTE_A]
-      },
-      criarExtracao: async () => ({ id: 'ext-1', status: 'pendente' }),
-    }
-    const { usuario } = abrir('/alta/novo', 'profissional', api)
-
-    expect(await screen.findByText('Não foi possível carregar a lista de pacientes.')).toBeInTheDocument()
-    await usuario.click(screen.getByRole('button', { name: 'Tentar de novo' }))
-
-    expect(await screen.findByRole('option', { name: 'Paciente fictício A' })).toBeInTheDocument()
-  })
-
-  test('paciente logado não acessa a tela de envio', async () => {
-    abrir('/alta/novo', 'paciente')
-
-    expect(await screen.findByRole('heading', { name: 'Seu perfil não tem acesso a esta função' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Extrair plano' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('escolha um sumário da base')
   })
 })

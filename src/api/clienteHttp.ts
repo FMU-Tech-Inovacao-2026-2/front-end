@@ -1,9 +1,9 @@
 import { ErroApi, MENSAGEM_ERRO_GENERICO, MENSAGEM_SEM_CONEXAO } from './erros'
 
 interface Opcoes {
-  /** URL do FastAPI, vinda de VITE_API_URL. */
+  /** URL da API Node.js + Express. */
   urlBase: string
-  /** Token de acesso do Supabase da sessão atual. */
+  /** Token de acesso da sessão atual. */
   obterToken: () => Promise<string | null>
 }
 

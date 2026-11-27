@@ -3,6 +3,7 @@ export type Perfil = 'profissional' | 'paciente'
 export interface Usuario {
   email: string
   perfil: Perfil
+  nome?: string
 }
 
 export type ResultadoLogin =

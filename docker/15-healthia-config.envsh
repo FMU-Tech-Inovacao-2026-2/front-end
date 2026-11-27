@@ -1,0 +1,38 @@
+#!/bin/sh
+# Lido (source) pela entrada do nginx antes do envsubst dos templates.
+# Gera /config.js a partir do ambiente e exporta a origem da API para a CSP.
+#   HEALTHIA_API_URL  URL pública da API (ex.: https://healthia-api-xxxx.a.run.app)
+#   HEALTHIA_MODO     backend | demonstracao (padrão: backend se houver URL)
+# Por ser lido com source, não altera opções do shell (set); erros encerram com exit 1.
+
+API_URL="${HEALTHIA_API_URL:-}"
+API_URL="${API_URL%/}"
+MODO="${HEALTHIA_MODO:-}"
+
+if [ -n "$API_URL" ] && ! printf '%s' "$API_URL" | grep -Eq '^https?://[A-Za-z0-9.:-]+(/[A-Za-z0-9._~/-]*)?$'; then
+  echo "HEALTHIA_API_URL inválida: use apenas http(s)://host[:porta][/caminho]" >&2
+  exit 1
+fi
+
+if [ -z "$MODO" ]; then
+  if [ -n "$API_URL" ]; then MODO=backend; else MODO=demonstracao; fi
+fi
+case "$MODO" in
+  backend|demonstracao) ;;
+  *) echo "HEALTHIA_MODO inválido: use backend ou demonstracao" >&2; exit 1 ;;
+esac
+if [ "$MODO" = backend ] && [ -z "$API_URL" ]; then
+  echo "HEALTHIA_MODO=backend exige HEALTHIA_API_URL" >&2
+  exit 1
+fi
+
+printf 'window.__HEALTHIA_CONFIG__ = { "modo": "%s", "apiUrl": "%s" }\n' "$MODO" "$API_URL" > /usr/share/nginx/html/config.js
+
+# Origem (esquema + host + porta) para o connect-src da CSP.
+HEALTHIA_API_ORIGIN=""
+if [ -n "$API_URL" ]; then
+  HEALTHIA_API_ORIGIN=$(printf '%s' "$API_URL" | sed -E 's#^(https?://[^/]+).*#\1#')
+fi
+export HEALTHIA_API_ORIGIN
+
+echo "HealthIA: modo=$MODO api=${HEALTHIA_API_ORIGIN:-nenhuma}"

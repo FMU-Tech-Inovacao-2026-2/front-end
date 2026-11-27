@@ -1,243 +1,280 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { useApi } from '../../api/ApiProvider'
-import type { Paciente } from '../../api/alta'
-import { ErroApi, MENSAGEM_ERRO_GENERICO } from '../../api/erros'
+import type { FonteEntrada, NovaExtracao, Paciente, SumarioBase } from '../../api/alta'
+import { useTratarErro } from '../../api/useTratarErro'
 import { useAuth } from '../../auth/AuthProvider'
-import { Cabecalho } from '../../components/Cabecalho'
+import { Aviso } from '../../components/Aviso'
 import { MensagemErro } from '../../components/MensagemErro'
+import { Carregando, Pagina } from '../../components/Pagina'
+import { formatarNumero } from '../../lib/formatar'
 import { EtapasAlta } from './EtapasAlta'
+import { lerArquivoSumario } from './lerArquivoSumario'
 
 const LIMITE_TEXTO = 20_000
-const formatarNumero = new Intl.NumberFormat('pt-BR')
+const FONTES: { id: FonteEntrada; titulo: string; descricao: string }[] = [
+  { id: 'base', titulo: 'Escolher da base', descricao: 'Sumários fictícios preparados pela equipe.' },
+  { id: 'arquivo', titulo: 'Importar arquivo', descricao: '.txt ou PDF com texto selecionável.' },
+  { id: 'texto', titulo: 'Digitar texto', descricao: 'Cole ou escreva o conteúdo do sumário.' },
+]
 
-function erroDoPaciente(pacienteId: string) {
-  return pacienteId === '' ? 'Escolha o paciente.' : undefined
-}
-
-function erroDoTexto(texto: string) {
-  const limpo = texto.trim()
-  if (limpo === '') return 'Cole o texto do sumário de alta.'
-  if (limpo.length > LIMITE_TEXTO) return `O texto passou de ${formatarNumero.format(LIMITE_TEXTO)} caracteres. Envie só o sumário de alta.`
-  return undefined
-}
+const CAMPO = 'foco min-h-12 w-full rounded-lg border border-borda-campo bg-white px-3 text-base text-marca'
 
 export default function EnvioSumario() {
   const { alta } = useApi()
+  const { modoDemonstracao } = useAuth()
+  const tratarErro = useTratarErro()
   const id = useId()
+  const navegar = useNavigate()
   const refPaciente = useRef<HTMLSelectElement>(null)
-  const refTexto = useRef<HTMLTextAreaElement>(null)
+  const refEntrada = useRef<HTMLTextAreaElement>(null)
+  const refArquivo = useRef<HTMLInputElement>(null)
 
-  const [pacientes, setPacientes] = useState<Paciente[] | null>(null)
-  const [falhaPacientes, setFalhaPacientes] = useState(false)
-  const [tentativaPacientes, setTentativaPacientes] = useState(0)
+  const [pacientes, setPacientes] = useState<Paciente[]>([])
+  const [sumarios, setSumarios] = useState<SumarioBase[]>([])
+  const [fonte, setFonte] = useState<FonteEntrada>('base')
   const [pacienteId, setPacienteId] = useState('')
+  const [sumarioId, setSumarioId] = useState('')
   const [texto, setTexto] = useState('')
+  const [nomeArquivo, setNomeArquivo] = useState('')
+  const [carregando, setCarregando] = useState(true)
+  const [lendoArquivo, setLendoArquivo] = useState(false)
   const [tentou, setTentou] = useState(false)
   const [enviando, setEnviando] = useState(false)
-  const [erroEnvio, setErroEnvio] = useState<string | null>(null)
-  const navegar = useNavigate()
-  const { sair } = useAuth()
+  const [erro, setErro] = useState<string | null>(null)
 
-  useEffect(() => {
-    document.title = 'Novo plano de alta · HealthIA'
-  }, [])
-
-  // Sincroniza com o servidor: a lista de pacientes vem da API.
   useEffect(() => {
     let ignorar = false
-    alta
-      .listarPacientes()
-      .then((lista) => {
-        if (!ignorar) setPacientes(lista)
-      })
-      .catch(async (erro: unknown) => {
+    Promise.all([alta.listarPacientes(), alta.listarSumarios()])
+      .then(([listaPacientes, listaSumarios]) => {
         if (ignorar) return
-        if (erro instanceof ErroApi && erro.status === 401) {
-          await sair()
-          navegar('/entrar', { replace: true, state: { voltarPara: '/alta/novo' } })
-          return
-        }
-        setFalhaPacientes(true)
+        setPacientes(listaPacientes)
+        setSumarios(listaSumarios)
+        setPacienteId(listaPacientes[0]?.id ?? '')
+        setSumarioId(listaSumarios[0]?.id ?? '')
       })
-    return () => {
-      ignorar = true
-    }
-  }, [alta, tentativaPacientes, sair, navegar])
+      .catch(async (falha: unknown) => {
+        const mensagem = await tratarErro(falha)
+        if (!ignorar && mensagem) setErro(mensagem)
+      })
+      .finally(() => { if (!ignorar) setCarregando(false) })
+    return () => { ignorar = true }
+  }, [alta, tratarErro])
 
-  function tentarPacientesDeNovo() {
-    setFalhaPacientes(false)
-    setTentativaPacientes((n) => n + 1)
+  const sumarioSelecionado = sumarios.find((sumario) => sumario.id === sumarioId)
+  const ocupado = enviando || lendoArquivo
+
+  async function importarArquivo(arquivo?: File) {
+    if (!arquivo) return
+    setErro(null)
+    setLendoArquivo(true)
+    try {
+      setTexto(await lerArquivoSumario(arquivo))
+      setNomeArquivo(arquivo.name)
+    } catch (falha) {
+      setTexto('')
+      setNomeArquivo('')
+      setErro(falha instanceof Error ? falha.message : 'Não foi possível ler esse arquivo.')
+    } finally {
+      setLendoArquivo(false)
+    }
   }
 
-  // Derivados no render: os erros só aparecem depois da primeira tentativa.
-  const erroPaciente = tentou ? erroDoPaciente(pacienteId) : undefined
-  const erroTexto = tentou ? erroDoTexto(texto) : undefined
-  const tamanho = texto.trim().length
+  function trocarFonte(nova: FonteEntrada) {
+    setFonte(nova)
+    setErro(null)
+    if (nova !== fonte) {
+      setTexto('')
+      setNomeArquivo('')
+    }
+  }
+
+  function validar(): string | undefined {
+    if (fonte === 'base') return sumarioId ? undefined : 'Escolha um sumário da base.'
+    if (!texto.trim()) return fonte === 'arquivo' ? 'Importe um arquivo com o sumário.' : 'Digite o texto do sumário.'
+    if (texto.trim().length > LIMITE_TEXTO) return `O sumário passou de ${formatarNumero.format(LIMITE_TEXTO)} caracteres.`
+    return undefined
+  }
 
   async function enviar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault()
-    if (enviando) return
+    if (ocupado) return
     setTentou(true)
-    if (erroDoPaciente(pacienteId)) {
+    if (!pacienteId) {
       refPaciente.current?.focus()
       return
     }
-    if (erroDoTexto(texto)) {
-      refTexto.current?.focus()
+    const erroEntrada = validar()
+    if (erroEntrada) {
+      if (fonte === 'arquivo') refArquivo.current?.focus()
+      else if (fonte === 'texto') refEntrada.current?.focus()
+      setErro(erroEntrada)
       return
     }
-    setErroEnvio(null)
+
+    const dados: NovaExtracao = fonte === 'base'
+      ? { origem: 'base', paciente_id: pacienteId, sumario_id: sumarioId }
+      : fonte === 'arquivo'
+        ? { origem: 'arquivo', paciente_id: pacienteId, nome_arquivo: nomeArquivo, texto: texto.trim() }
+        : { origem: 'texto', paciente_id: pacienteId, texto: texto.trim() }
+
+    setErro(null)
     setEnviando(true)
     try {
-      const extracao = await alta.criarExtracao({ paciente_id: pacienteId, texto: texto.trim() })
+      const extracao = await alta.criarExtracao(dados)
       navegar(`/alta/extracoes/${encodeURIComponent(extracao.id)}`)
-    } catch (erro) {
-      if (erro instanceof ErroApi && erro.status === 401) {
-        await sair()
-        navegar('/entrar', { replace: true, state: { voltarPara: '/alta/novo' } })
-        return
-      }
+    } catch (falha) {
+      const mensagem = await tratarErro(falha)
       setEnviando(false)
-      setErroEnvio(erro instanceof ErroApi ? erro.message : MENSAGEM_ERRO_GENERICO)
+      if (mensagem) setErro(mensagem)
     }
   }
 
-  const idPaciente = `${id}-paciente`
-  const idPacienteErro = `${id}-paciente-erro`
-  const idTexto = `${id}-texto`
-  const idTextoErro = `${id}-texto-erro`
-  const idContador = `${id}-contador`
-
   return (
-    <div className="min-h-dvh">
-      <Cabecalho />
-      <main id="conteudo" className="mx-auto flex max-w-280 flex-col gap-6 px-5 py-8 sm:px-6">
-        <EtapasAlta atual={1} />
-        <div className="flex flex-col gap-1.5">
-          <h1 className="text-3xl font-bold">Novo plano de alta</h1>
-          <p className="max-w-[70ch] text-base text-texto-suave">
-            Cole o texto do sumário de alta. A IA organiza o que está escrito e você revisa antes de qualquer informação chegar
-            ao paciente.
-          </p>
-        </div>
+    <Pagina titulo="Novo plano de alta">
+      <EtapasAlta atual={1} />
+      <header className="flex flex-col gap-2">
+        <p className="text-sm font-semibold text-destaque-escuro">Alta Assistida</p>
+        <h1 className="text-3xl font-bold">Novo plano de alta</h1>
+        <p className="max-w-[70ch] text-base text-texto-suave">
+          Escolha o paciente e informe o sumário de alta. A IA organiza o texto em sugestões com o trecho de origem de cada uma.
+          Nada chega ao paciente antes da sua revisão e do seu aceite.
+        </p>
+      </header>
 
-        <div className="flex flex-wrap items-start gap-6">
-          <form noValidate onSubmit={enviar} aria-busy={enviando} className="flex min-w-0 flex-[999_1_560px] flex-col gap-5 rounded-xl border bg-white p-6">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={idPaciente} className="text-[0.9375rem] font-semibold">
-                Paciente
-              </label>
-              <select
-                id={idPaciente}
-                ref={refPaciente}
-                value={pacienteId}
-                onChange={(e) => setPacienteId(e.target.value)}
-                aria-invalid={Boolean(erroPaciente)}
-                aria-describedby={erroPaciente ? idPacienteErro : undefined}
-                className={`min-h-12 w-full rounded-lg bg-white px-3 text-base text-marca focus-visible:outline-hidden focus-visible:ring-3 focus-visible:ring-destaque/40 ${
-                  erroPaciente ? 'border-2 border-erro' : 'border border-borda-campo focus-visible:border-destaque'
-                }`}
-              >
-                <option value="">
-                  {pacientes ? 'Escolha o paciente' : falhaPacientes ? 'Lista indisponível' : 'Carregando pacientes…'}
-                </option>
-                {(pacientes ?? []).map((paciente) => (
-                  <option key={paciente.id} value={paciente.id}>
-                    {paciente.nome}
-                  </option>
-                ))}
-              </select>
-              {erroPaciente ? <MensagemErro id={idPacienteErro}>{erroPaciente}</MensagemErro> : null}
-              {falhaPacientes ? (
-                <div role="alert" className="entrada-aviso flex flex-wrap items-center justify-between gap-3 rounded-lg border border-erro/40 bg-erro-fundo px-3.5 py-2.5">
-                  <p className="text-[0.9375rem] text-erro">Não foi possível carregar a lista de pacientes.</p>
-                  <button
-                    type="button"
-                    onClick={tentarPacientesDeNovo}
-                    className="pressionavel min-h-11 rounded-lg border border-borda-campo bg-white px-4 text-sm font-semibold text-marca hover:bg-superficie focus-visible:outline-hidden focus-visible:ring-3 focus-visible:ring-destaque/40"
+      {modoDemonstracao ? (
+        <Aviso tom="demo" titulo="Demonstração guiada">
+          Sugestões preparadas no navegador para os sumários da base; nada é enviado ao back-end ou à IA. Um dos casos traz um
+          erro proposital da IA para mostrar a verificação de origem. Textos digitados ou importados retornam o mesmo aviso que o
+          servidor dá quando a IA não está configurada.
+        </Aviso>
+      ) : null}
+
+      {carregando ? (
+        <Carregando texto="Carregando pacientes e sumários fictícios…" />
+      ) : (
+        <form noValidate onSubmit={enviar} aria-busy={ocupado} className="cartao flex flex-col gap-6 p-5 sm:p-6">
+          <div className="flex max-w-md flex-col gap-1.5">
+            <label htmlFor={`${id}-paciente`} className="text-[0.9375rem] font-semibold">Paciente</label>
+            <select
+              id={`${id}-paciente`}
+              ref={refPaciente}
+              value={pacienteId}
+              onChange={(evento) => setPacienteId(evento.target.value)}
+              aria-invalid={Boolean(tentou && !pacienteId)}
+              aria-describedby={tentou && !pacienteId ? `${id}-paciente-erro` : undefined}
+              className={CAMPO}
+            >
+              <option value="">Escolha o paciente</option>
+              {pacientes.map((paciente) => <option key={paciente.id} value={paciente.id}>{paciente.nome}</option>)}
+            </select>
+            {tentou && !pacienteId ? <MensagemErro id={`${id}-paciente-erro`}>Escolha o paciente.</MensagemErro> : null}
+          </div>
+
+          <fieldset className="flex flex-col gap-3">
+            <legend className="mb-3 text-[0.9375rem] font-semibold">Como deseja informar o sumário?</legend>
+            <div className="grid gap-3 md:grid-cols-3">
+              {FONTES.map((opcao) => {
+                const marcada = fonte === opcao.id
+                return (
+                  <label
+                    key={opcao.id}
+                    className={`relative flex min-h-20 cursor-pointer items-start gap-3 rounded-lg border px-4 py-3 has-focus-visible:ring-3 has-focus-visible:ring-destaque/45 ${marcada ? 'border-destaque bg-destaque-fundo' : 'border-borda-campo bg-white hover:bg-superficie'}`}
                   >
-                    Tentar de novo
-                  </button>
+                    <input
+                      type="radio"
+                      name={`${id}-fonte`}
+                      value={opcao.id}
+                      checked={marcada}
+                      onChange={() => trocarFonte(opcao.id)}
+                      className="mt-1 size-4 shrink-0 accent-destaque"
+                    />
+                    <span className="flex flex-col gap-0.5">
+                      <span className="font-semibold">{opcao.titulo}</span>
+                      <span className="text-sm text-texto-suave">{opcao.descricao}</span>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          </fieldset>
+
+          {fonte === 'base' ? (
+            <div className="flex flex-col gap-3">
+              <label htmlFor={`${id}-sumario`} className="text-[0.9375rem] font-semibold">Sumários fictícios disponíveis</label>
+              <select id={`${id}-sumario`} value={sumarioId} onChange={(evento) => setSumarioId(evento.target.value)} className={`${CAMPO} max-w-xl`}>
+                <option value="">Escolha um sumário</option>
+                {sumarios.map((sumario) => <option key={sumario.id} value={sumario.id}>{sumario.titulo}</option>)}
+              </select>
+              {sumarioSelecionado ? (
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm text-texto-suave">{sumarioSelecionado.descricao}</p>
+                  <pre aria-label="Prévia do sumário" className="max-h-72 overflow-auto rounded-lg border bg-superficie p-4 font-sans text-sm leading-relaxed whitespace-pre-wrap">{sumarioSelecionado.texto}</pre>
                 </div>
               ) : null}
             </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={idTexto} className="text-[0.9375rem] font-semibold">
-                Texto do sumário de alta
-              </label>
-              <textarea
-                id={idTexto}
-                ref={refTexto}
-                value={texto}
-                onChange={(e) => setTexto(e.target.value)}
-                rows={14}
-                spellCheck={false}
-                aria-invalid={Boolean(erroTexto)}
-                aria-describedby={erroTexto ? `${idTextoErro} ${idContador}` : idContador}
-                className={`w-full resize-y rounded-lg bg-white px-3.5 py-3 font-mono text-sm leading-relaxed text-marca focus-visible:outline-hidden focus-visible:ring-3 focus-visible:ring-destaque/40 ${
-                  erroTexto ? 'border-2 border-erro' : 'border border-borda-campo focus-visible:border-destaque'
-                }`}
+          ) : fonte === 'arquivo' ? (
+            <div className="flex flex-col gap-3">
+              <label htmlFor={`${id}-arquivo`} className="text-[0.9375rem] font-semibold">Arquivo do sumário (.txt ou PDF)</label>
+              <input
+                id={`${id}-arquivo`}
+                ref={refArquivo}
+                type="file"
+                accept=".txt,.pdf,text/plain,application/pdf"
+                aria-describedby={`${id}-arquivo-ajuda`}
+                onChange={(evento) => void importarArquivo(evento.target.files?.[0])}
+                className="foco min-h-12 max-w-xl rounded-lg border border-dashed border-borda-campo bg-white p-2 text-sm file:mr-3 file:min-h-9 file:rounded-md file:border-0 file:bg-marca file:px-3 file:font-semibold file:text-white"
               />
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                {erroTexto ? <MensagemErro id={idTextoErro}>{erroTexto}</MensagemErro> : <span />}
-                <span id={idContador} className={`text-sm ${tamanho > LIMITE_TEXTO ? 'font-semibold text-erro' : 'text-texto-suave'}`}>
-                  {formatarNumero.format(tamanho)} de {formatarNumero.format(LIMITE_TEXTO)} caracteres
-                </span>
-              </div>
-            </div>
-
-            {erroEnvio ? (
-              <p
-                role="alert"
-                className="entrada-aviso flex items-start gap-2 rounded-lg border border-erro/40 bg-erro-fundo px-3.5 py-3 text-[0.9375rem] text-erro"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="mt-px shrink-0">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 8v5M12 16h.01" />
-                </svg>
-                {erroEnvio}
+              <p id={`${id}-arquivo-ajuda`} className="text-sm text-texto-suave">
+                O arquivo é lido no seu navegador; só o texto extraído segue para a análise. PDFs digitalizados, sem texto selecionável,
+                não têm OCR nesta versão.
               </p>
-            ) : null}
-
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              {enviando ? (
-                <p role="status" className="text-sm text-texto-suave">
-                  Isso pode levar alguns segundos.
-                </p>
-              ) : null}
-              <button
-                type="submit"
-                disabled={enviando}
-                className="pressionavel inline-flex min-h-12 items-center gap-2 rounded-lg bg-marca px-6 text-base font-semibold text-white hover:bg-marca-escura focus-visible:outline-hidden focus-visible:ring-3 focus-visible:ring-destaque/50 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-80"
-              >
-                {enviando ? 'Extraindo…' : 'Extrair plano'}
-              </button>
+              {lendoArquivo ? <p role="status" className="text-sm text-texto-suave">Lendo arquivo…</p> : null}
+              {nomeArquivo ? <p className="text-sm font-semibold text-sucesso">Arquivo lido: {nomeArquivo}</p> : null}
+              {texto ? <pre aria-label="Texto lido do arquivo" className="max-h-72 overflow-auto rounded-lg border bg-superficie p-4 font-sans text-sm leading-relaxed whitespace-pre-wrap">{texto}</pre> : null}
             </div>
-          </form>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <label htmlFor={`${id}-texto`} className="text-[0.9375rem] font-semibold">Texto do sumário de alta</label>
+              <textarea
+                id={`${id}-texto`}
+                ref={refEntrada}
+                value={texto}
+                onChange={(evento) => setTexto(evento.target.value)}
+                rows={12}
+                maxLength={LIMITE_TEXTO}
+                aria-describedby={`${id}-contador`}
+                placeholder="Cole aqui o sumário de alta fictício…"
+                className="foco w-full resize-y rounded-lg border border-borda-campo bg-white px-3.5 py-3 text-[0.9375rem] leading-relaxed text-marca"
+              />
+              <span id={`${id}-contador`} className="text-right text-sm text-texto-suave">
+                {formatarNumero.format(texto.length)} de {formatarNumero.format(LIMITE_TEXTO)} caracteres
+              </span>
+            </div>
+          )}
 
-          <aside aria-label="Como funciona" className="flex flex-[1_1_280px] flex-col gap-4">
-            <section className="flex flex-col gap-3 rounded-xl border bg-white p-5">
-              <h2 className="text-base font-semibold">O que acontece depois</h2>
-              <ol className="flex list-decimal flex-col gap-2 pl-5 text-[0.9375rem] leading-snug text-texto-suave marker:font-semibold marker:text-marca">
-                <li>A IA extrai medicamentos, doses, alertas, orientações e retornos.</li>
-                <li>Cada item traz o trecho do sumário de onde saiu; o sistema confere se o trecho existe.</li>
-                <li>Você revisa, corrige e aprova. Só então o paciente recebe o plano.</li>
-              </ol>
-            </section>
-            <section className="flex flex-col gap-2 rounded-xl border bg-white p-5">
-              <h2 className="text-base font-semibold">Limites da IA</h2>
-              <p className="text-[0.9375rem] leading-snug text-texto-suave">
-                Não diagnostica, não altera prescrição e não completa lacunas. O que o sumário não traz aparece como “não informado”.
-              </p>
-            </section>
-            <p className="text-sm leading-snug text-texto-suave">
-              Protótipo acadêmico: use somente sumários fictícios. Dados de saúde são dados sensíveis pela LGPD.
+          {erro ? <MensagemErro>{erro}</MensagemErro> : null}
+
+          {enviando ? (
+            <div role="status" className="flex items-start gap-3 rounded-lg bg-superficie p-4 text-sm">
+              <span aria-hidden="true" className="mt-0.5 size-4 shrink-0 animate-spin rounded-full border-2 border-borda border-t-destaque motion-reduce:animate-none" />
+              <span>
+                <strong className="block text-marca">{modoDemonstracao ? 'Preparando as sugestões…' : 'A IA está organizando o sumário…'}</strong>
+                Em seguida, o servidor confere cada citação no texto original.
+              </span>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center gap-4 border-t pt-5">
+            <button type="submit" disabled={ocupado} className="botao-primario min-h-12 px-6">
+              {enviando ? 'Extraindo…' : lendoArquivo ? 'Lendo arquivo…' : modoDemonstracao ? 'Gerar sugestões' : 'Extrair com IA'}
+            </button>
+            <p className="max-w-[60ch] text-sm text-texto-suave">
+              Use somente sumários fictícios. O resultado fica pendente até a sua revisão e aprovação.
             </p>
-          </aside>
-        </div>
-      </main>
-    </div>
+          </div>
+        </form>
+      )}
+    </Pagina>
   )
 }

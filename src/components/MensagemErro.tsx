@@ -1,7 +1,7 @@
 /** Mensagem de erro de um campo, com ícone. Ligue ao campo por aria-describedby. */
-export function MensagemErro({ id, children }: { id: string; children: string }) {
+export function MensagemErro({ id, children }: { id?: string; children: string }) {
   return (
-    <p id={id} className="entrada-erro-campo flex items-center gap-1.5 text-sm text-erro">
+    <p id={id} role="alert" className="entrada-erro-campo flex items-center gap-1.5 text-sm text-erro">
       <svg
         width="16"
         height="16"
