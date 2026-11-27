@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link, Navigate, useLocation } from 'react-router'
-import { Cabecalho } from '../components/Cabecalho'
+import { Pagina } from '../components/Pagina'
 import { useAuth } from './AuthProvider'
 import type { Perfil } from './tipos'
 
@@ -32,18 +32,10 @@ export function RotaProtegida({ children, perfis }: Props) {
 
 function SemPermissao() {
   return (
-    <div className="min-h-dvh">
-      <Cabecalho />
-      <main id="conteudo" className="mx-auto flex max-w-205 flex-col items-start gap-4 px-5 py-11">
-        <h1 className="text-2xl font-bold">Seu perfil não tem acesso a esta função</h1>
-        <p className="text-base text-texto-suave">Se você acha que deveria ter acesso, fale com o administrador da sua unidade.</p>
-        <Link
-          to="/"
-          className="pressionavel inline-flex min-h-11 items-center rounded-lg bg-marca px-5 font-semibold text-white hover:bg-marca-escura focus-visible:outline-hidden focus-visible:ring-3 focus-visible:ring-destaque/50 focus-visible:ring-offset-2"
-        >
-          Voltar para o início
-        </Link>
-      </main>
-    </div>
+    <Pagina titulo="Sem acesso" largura="estreita">
+      <h1 className="text-2xl font-bold">Seu perfil não tem acesso a esta função</h1>
+      <p className="text-base text-texto-suave">Se você acha que deveria ter acesso, fale com o administrador da sua unidade.</p>
+      <Link to="/" className="botao-primario self-start">Voltar para o início</Link>
+    </Pagina>
   )
 }

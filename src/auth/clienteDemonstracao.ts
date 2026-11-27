@@ -1,15 +1,13 @@
-import { MENSAGEM_CREDENCIAIS, perfilValido, type ClienteAuth, type Perfil, type Usuario } from './tipos'
+import { perfilValido, type ClienteAuth, type Perfil, type Usuario } from './tipos'
 
 /**
- * Contas fictícias para a apresentação, sem Supabase e sem dados reais.
- * Ative com VITE_MODO_DEMONSTRACAO=true. Não use em produção.
+ * Contas fictícias para a apresentação, sem rede e sem dados reais.
+ * Ative com VITE_MODO_DEMONSTRACAO=true (ou modo "demonstracao" no /config.js).
  */
 export const CONTAS_DEMONSTRACAO: Record<Perfil, Usuario> = {
-  profissional: { email: 'profissional@demo.healthia', perfil: 'profissional' },
-  paciente: { email: 'paciente@demo.healthia', perfil: 'paciente' },
+  profissional: { email: 'profissional@demo.healthia', perfil: 'profissional', nome: 'Dra. Ana Demo' },
+  paciente: { email: 'paciente@demo.healthia', perfil: 'paciente', nome: 'Paciente Demo' },
 }
-export const SENHA_DEMONSTRACAO = 'demonstracao'
-
 const CHAVE = 'healthia:demo:perfil'
 
 function lerPerfilSalvo(): Perfil | null {
@@ -34,10 +32,11 @@ export function criarClienteDemonstracao(): ClienteAuth {
     modoDemonstracao: true,
 
     async entrarComSenha(email, senha) {
-      const conta = Object.values(CONTAS_DEMONSTRACAO).find(
-        (c) => c.email === email.trim().toLowerCase(),
-      )
-      if (!conta || senha !== SENHA_DEMONSTRACAO) return { ok: false, mensagem: MENSAGEM_CREDENCIAIS }
+      // A demonstração é offline: os campos não autenticam nem consultam a API.
+      // O e-mail só escolhe qual perfil fictício abrir; senha é ignorada.
+      void senha
+      const perfil: Perfil = email.toLowerCase().includes('paciente') ? 'paciente' : 'profissional'
+      const conta = CONTAS_DEMONSTRACAO[perfil]
       salvarPerfil(conta.perfil)
       return { ok: true, usuario: conta }
     },

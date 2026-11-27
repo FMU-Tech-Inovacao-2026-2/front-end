@@ -3,15 +3,19 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, test } from 'vitest'
 import { Rotas } from './App'
+import { ApiProvider } from './api/ApiProvider'
+import { criarApiAltaDemonstracao } from './api/demonstracao'
 import { AuthProvider } from './auth/AuthProvider'
 import { criarClienteDemonstracao } from './auth/clienteDemonstracao'
 
 function abrirApp(caminho: string) {
   render(
     <AuthProvider cliente={criarClienteDemonstracao()}>
-      <MemoryRouter initialEntries={[caminho]}>
-        <Rotas />
-      </MemoryRouter>
+      <ApiProvider apis={{ alta: criarApiAltaDemonstracao() }}>
+        <MemoryRouter initialEntries={[caminho]}>
+          <Rotas />
+        </MemoryRouter>
+      </ApiProvider>
     </AuthProvider>,
   )
   return userEvent.setup()

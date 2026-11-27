@@ -5,7 +5,8 @@ interface ImportMetaEnv {
   /** Chave pública (publishable/anon). Nunca a service_role: tudo que começa com VITE_ vai para o navegador. */
   readonly VITE_SUPABASE_CHAVE_PUBLICA?: string
   readonly VITE_MODO_DEMONSTRACAO?: string
-  /** Endereço do back-end FastAPI, sem barra no final. */
+  readonly VITE_MODO_BACKEND?: string
+  /** Endereço do back-end Node.js + Express, sem barra no final. */
   readonly VITE_API_URL?: string
 }
 

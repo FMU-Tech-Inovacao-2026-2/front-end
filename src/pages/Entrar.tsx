@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../auth/AuthProvider'
 import type { Perfil, ResultadoLogin } from '../auth/tipos'
 import { CampoTexto } from '../components/CampoTexto'
@@ -24,7 +24,9 @@ export default function Entrar() {
   const auth = useAuth()
   const navegar = useNavigate()
   const local = useLocation()
-  const voltarPara = (local.state as { voltarPara?: string } | null)?.voltarPara ?? '/'
+  const estado = local.state as { voltarPara?: string; motivo?: string } | null
+  const voltarPara = estado?.voltarPara ?? '/'
+  const sessaoExpirada = estado?.motivo === 'sessao_expirada'
 
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
@@ -131,6 +133,12 @@ export default function Entrar() {
               </p>
             </div>
 
+            {sessaoExpirada && !erroLogin ? (
+              <p role="status" className="entrada-aviso rounded-lg border border-atencao-borda bg-atencao-fundo px-3.5 py-3 text-[0.9375rem] text-atencao">
+                Sua sessão expirou. Entre de novo para continuar de onde parou.
+              </p>
+            ) : null}
+
             <CampoTexto
               ref={refEmail}
               rotulo="E-mail"
@@ -189,7 +197,10 @@ export default function Entrar() {
             </button>
 
             <p className="text-sm leading-normal text-texto-suave">
-              Esqueceu a senha? Fale com o administrador da sua unidade.
+              Esqueceu a senha? Fale com o administrador da sua unidade.{' '}
+              <Link to="/privacidade" className="foco rounded font-semibold text-destaque-escuro underline underline-offset-4">
+                Privacidade e uso de dados
+              </Link>
             </p>
           </form>
 
@@ -200,6 +211,7 @@ export default function Entrar() {
                 Acesso de demonstração
                 <span aria-hidden="true" className="h-px flex-1 bg-borda" />
               </h2>
+              <p className="text-sm text-texto-suave">Entre com um clique. Tudo roda no navegador, com dados fictícios, sem IA e sem servidor. Comece como profissional para criar e aprovar uma alta; depois entre como paciente para ver o plano.</p>
               <div className="grid grid-cols-2 gap-2.5">
                 <BotaoDemonstracao rotulo="Profissional de saúde" onClick={() => entrarDemonstracao('profissional')} />
                 <BotaoDemonstracao rotulo="Paciente" onClick={() => entrarDemonstracao('paciente')} />
