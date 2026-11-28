@@ -1,13 +1,21 @@
 /** Erro devolvido pela API no formato { "erro": { "codigo", "mensagem" } }. */
+export interface DetalheErro {
+  campo: string
+  mensagem: string
+}
+
 export class ErroApi extends Error {
   readonly codigo: string
   readonly status: number
+  /** Erros por campo devolvidos pela validação do servidor (DADOS_INVALIDOS). */
+  readonly detalhes: DetalheErro[]
 
-  constructor(codigo: string, mensagem: string, status: number) {
+  constructor(codigo: string, mensagem: string, status: number, detalhes: DetalheErro[] = []) {
     super(mensagem)
     this.name = 'ErroApi'
     this.codigo = codigo
     this.status = status
+    this.detalhes = detalhes
   }
 }
 

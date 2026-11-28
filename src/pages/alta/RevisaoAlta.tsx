@@ -5,10 +5,10 @@ import type { EdicaoSugestaoAlta, ExtracaoAlta, SugestaoAlta } from '../../api/a
 import { useTratarErro } from '../../api/useTratarErro'
 import { Aviso } from '../../components/Aviso'
 import { Carregando, Pagina } from '../../components/Pagina'
-import { plural } from '../../lib/formatar'
+import { formatarNumero, plural } from '../../lib/formatar'
 import { COR_CATEGORIA, ROTULO_CATEGORIA } from './categorias'
 import { EtapasAlta } from './EtapasAlta'
-import { lerRascunho, salvarRascunho, type Decisao, type RascunhoRevisao } from './rascunho'
+import { lerRascunho, MOTIVO_MINIMO, MOTIVOS_FREQUENTES, salvarRascunho, type Decisao, type RascunhoRevisao } from './rascunho'
 
 /** Posição do trecho no texto original, sem diferenciar maiúsculas. */
 function localizar(texto: string, trecho: string): [number, number] | null {
@@ -28,7 +28,7 @@ function rascunhoInicial(extracao: ExtracaoAlta): RascunhoRevisao {
     if (!item.origem_verificada) decisoes[item.id] = 'reprovada'
     else if (salvo?.decisoes[item.id]) decisoes[item.id] = salvo.decisoes[item.id]
   }
-  return { decisoes, edicoes: salvo?.edicoes ?? {} }
+  return { decisoes, edicoes: salvo?.edicoes ?? {}, motivos: salvo?.motivos ?? {} }
 }
 
 export default function RevisaoAlta() {
@@ -37,7 +37,7 @@ export default function RevisaoAlta() {
   const tratarErro = useTratarErro()
   const navegar = useNavigate()
   const [extracao, setExtracao] = useState<ExtracaoAlta | null>(null)
-  const [rascunho, setRascunho] = useState<RascunhoRevisao>({ decisoes: {}, edicoes: {} })
+  const [rascunho, setRascunho] = useState<RascunhoRevisao>({ decisoes: {}, edicoes: {}, motivos: {} })
   const [editando, setEditando] = useState<string | null>(null)
   const [emFoco, setEmFoco] = useState<string | null>(null)
   const [carregando, setCarregando] = useState(true)
@@ -73,6 +73,10 @@ export default function RevisaoAlta() {
     if (decisao === 'aceita' && !item.origem_verificada) return
     atualizar({ ...rascunho, decisoes: { ...rascunho.decisoes, [item.id]: decisao } })
     setEmFoco(item.id)
+  }
+
+  function definirMotivo(item: SugestaoAlta, motivo: string) {
+    atualizar({ ...rascunho, motivos: { ...rascunho.motivos, [item.id]: motivo } })
   }
 
   function aceitarVerificadas() {
@@ -130,9 +134,18 @@ export default function RevisaoAlta() {
   const itemEmFoco = sugestoes.find((item) => item.id === emFoco)
   const faixa = itemEmFoco ? localizar(extracao.texto_original, itemEmFoco.trecho_origem) : null
 
+  // Salvaguarda G2: reprovar uma sugestão com origem confirmada exige motivo.
+  const semMotivo = sugestoes.filter(
+    (item) => item.origem_verificada && rascunho.decisoes[item.id] === 'reprovada' && (rascunho.motivos[item.id] ?? '').trim().length < MOTIVO_MINIMO,
+  )
+
   function continuar() {
     if (pendentes > 0) {
       setErro(`Decida as ${plural(pendentes, 'sugestão restante', 'sugestões restantes')} antes de continuar.`)
+      return
+    }
+    if (semMotivo.length > 0) {
+      setErro(`Informe o motivo da reprovação de: ${semMotivo.map((item) => item.titulo).join('; ')}.`)
       return
     }
     if (aceitas === 0) {
@@ -158,10 +171,24 @@ export default function RevisaoAlta() {
         <p className="text-sm font-semibold text-destaque-escuro">Alta Assistida</p>
         <h1 className="text-3xl font-bold">Sugestões da IA</h1>
         <p className="max-w-[75ch] text-base text-texto-suave">
-          Decida cada sugestão: aceite, reprove ou edite. Use “Mostrar no sumário” para conferir o trecho citado no texto original.
-          A IA pode errar; o que você não aceitar não chega ao paciente.
+          Decida cada sugestão: aceite, reprove (com motivo) ou edite. Use “Mostrar no sumário” para conferir o trecho citado no
+          texto original. A IA pode errar; o que você não aceitar não chega ao paciente.
         </p>
+        {extracao.ia ? (
+          <p className="text-sm text-texto-suave">
+            Gerado por <span className="font-mono">{extracao.ia.modelo}</span> em {formatarNumero.format(Math.round(extracao.ia.duracao_ms / 100) / 10)} s
+            {extracao.ia.reparos ? ` · ${plural(extracao.ia.reparos, 'correção de formato', 'correções de formato')}` : ''}
+            {extracao.transcricao_ia ? ' · texto transcrito de PDF pela IA e conferido' : ''}
+          </p>
+        ) : null}
       </header>
+
+      {sugestoes.length === 0 ? (
+        <Aviso tom="atencao" titulo="A IA não encontrou itens para o plano">
+          <p>Não há medicamento, cuidado, retorno ou sinal de alerta descrito de forma explícita neste texto. A IA não completa lacunas.</p>
+          <Link to="/alta/novo" className="botao-secundario mt-2">Revisar o sumário e tentar de novo</Link>
+        </Aviso>
+      ) : null}
 
       {semOrigem > 0 ? (
         <Aviso tom="atencao" titulo={`${plural(semOrigem, 'sugestão tem', 'sugestões têm')} citação que não existe no sumário`}>
@@ -214,6 +241,8 @@ export default function RevisaoAlta() {
               edicao={rascunho.edicoes[item.id]}
               editando={editando === item.id}
               emFoco={emFoco === item.id}
+              motivo={rascunho.motivos[item.id] ?? ''}
+              aoMotivo={(motivo) => definirMotivo(item, motivo)}
               aoDecidir={(decisao) => decidir(item, decisao)}
               aoEditar={(campos) => editar(item, campos)}
               aoAlternarEdicao={() => setEditando((atual) => (atual === item.id ? null : item.id))}
@@ -251,6 +280,8 @@ interface PropsCartao {
   item: SugestaoAlta
   decisao?: Decisao
   edicao?: EdicaoSugestaoAlta
+  motivo: string
+  aoMotivo(motivo: string): void
   editando: boolean
   emFoco: boolean
   aoDecidir(decisao: Decisao): void
@@ -260,7 +291,7 @@ interface PropsCartao {
   aoMostrar(): void
 }
 
-function CartaoSugestao({ item, decisao, edicao, editando, emFoco, aoDecidir, aoEditar, aoAlternarEdicao, aoDesfazer, aoMostrar }: PropsCartao) {
+function CartaoSugestao({ item, decisao, edicao, motivo, aoMotivo, editando, emFoco, aoDecidir, aoEditar, aoAlternarEdicao, aoDesfazer, aoMostrar }: PropsCartao) {
   const id = useId()
   const titulo = edicao?.titulo ?? item.titulo
   const descricao = edicao?.descricao ?? item.descricao
@@ -337,6 +368,31 @@ function CartaoSugestao({ item, decisao, edicao, editando, emFoco, aoDecidir, ao
           <button type="button" onClick={aoDesfazer} className="botao-discreto text-texto-suave">Desfazer edição</button>
         ) : null}
       </div>
+
+      {decisao === 'reprovada' && item.origem_verificada ? (
+        <div className="mt-4 flex flex-col gap-2 rounded-lg border border-erro/30 bg-erro-fundo/40 p-4">
+          <label htmlFor={`${id}-motivo`} className="text-sm font-semibold">Motivo da reprovação (obrigatório)</label>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Motivos frequentes">
+            {MOTIVOS_FREQUENTES.map((opcao) => (
+              <button key={opcao} type="button" onClick={() => aoMotivo(opcao)} aria-pressed={motivo === opcao} className={`pressionavel foco rounded-full border px-3 py-1 text-xs font-semibold ${motivo === opcao ? 'border-erro/50 bg-white text-erro' : 'border-borda-campo bg-white text-texto-suave hover:text-marca'}`}>
+                {opcao}
+              </button>
+            ))}
+          </div>
+          <textarea
+            id={`${id}-motivo`}
+            value={motivo}
+            onChange={(evento) => aoMotivo(evento.target.value)}
+            rows={2}
+            maxLength={500}
+            aria-invalid={motivo.trim().length < MOTIVO_MINIMO}
+            aria-describedby={`${id}-motivo-ajuda`}
+            placeholder="Explique por que este item não deve ir para o plano."
+            className="foco resize-y rounded-lg border border-borda-campo bg-white px-3 py-2 text-sm"
+          />
+          <p id={`${id}-motivo-ajuda`} className="text-xs text-texto-suave">O motivo fica no comprovante do aceite. O paciente não vê itens reprovados.</p>
+        </div>
+      ) : null}
     </article>
   )
 }

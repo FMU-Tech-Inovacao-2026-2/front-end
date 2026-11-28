@@ -1,15 +1,15 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useApi } from '../../api/ApiProvider'
 import type { FonteEntrada, NovaExtracao, Paciente, SumarioBase } from '../../api/alta'
 import { useTratarErro } from '../../api/useTratarErro'
 import { useAuth } from '../../auth/AuthProvider'
 import { Aviso } from '../../components/Aviso'
+import { ImportarArquivo, type ArquivoLido } from '../../components/ImportarArquivo'
 import { MensagemErro } from '../../components/MensagemErro'
 import { Carregando, Pagina } from '../../components/Pagina'
 import { formatarNumero } from '../../lib/formatar'
 import { EtapasAlta } from './EtapasAlta'
-import { lerArquivoSumario } from './lerArquivoSumario'
 
 const LIMITE_TEXTO = 20_000
 const FONTES: { id: FonteEntrada; titulo: string; descricao: string }[] = [
@@ -29,6 +29,8 @@ export default function EnvioSumario() {
   const refPaciente = useRef<HTMLSelectElement>(null)
   const refEntrada = useRef<HTMLTextAreaElement>(null)
   const refArquivo = useRef<HTMLInputElement>(null)
+  const [parametros] = useSearchParams()
+  const pacienteSugerido = parametros.get('paciente')
 
   const [pacientes, setPacientes] = useState<Paciente[]>([])
   const [sumarios, setSumarios] = useState<SumarioBase[]>([])
@@ -36,9 +38,8 @@ export default function EnvioSumario() {
   const [pacienteId, setPacienteId] = useState('')
   const [sumarioId, setSumarioId] = useState('')
   const [texto, setTexto] = useState('')
-  const [nomeArquivo, setNomeArquivo] = useState('')
+  const [arquivo, setArquivo] = useState<ArquivoLido | null>(null)
   const [carregando, setCarregando] = useState(true)
-  const [lendoArquivo, setLendoArquivo] = useState(false)
   const [tentou, setTentou] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
@@ -50,7 +51,7 @@ export default function EnvioSumario() {
         if (ignorar) return
         setPacientes(listaPacientes)
         setSumarios(listaSumarios)
-        setPacienteId(listaPacientes[0]?.id ?? '')
+        setPacienteId(listaPacientes.find((p) => p.id === pacienteSugerido)?.id ?? listaPacientes[0]?.id ?? '')
         setSumarioId(listaSumarios[0]?.id ?? '')
       })
       .catch(async (falha: unknown) => {
@@ -59,39 +60,28 @@ export default function EnvioSumario() {
       })
       .finally(() => { if (!ignorar) setCarregando(false) })
     return () => { ignorar = true }
-  }, [alta, tratarErro])
+  }, [alta, tratarErro, pacienteSugerido])
 
   const sumarioSelecionado = sumarios.find((sumario) => sumario.id === sumarioId)
-  const ocupado = enviando || lendoArquivo
-
-  async function importarArquivo(arquivo?: File) {
-    if (!arquivo) return
-    setErro(null)
-    setLendoArquivo(true)
-    try {
-      setTexto(await lerArquivoSumario(arquivo))
-      setNomeArquivo(arquivo.name)
-    } catch (falha) {
-      setTexto('')
-      setNomeArquivo('')
-      setErro(falha instanceof Error ? falha.message : 'Não foi possível ler esse arquivo.')
-    } finally {
-      setLendoArquivo(false)
-    }
-  }
+  const ocupado = enviando
 
   function trocarFonte(nova: FonteEntrada) {
     setFonte(nova)
     setErro(null)
     if (nova !== fonte) {
       setTexto('')
-      setNomeArquivo('')
+      setArquivo(null)
     }
   }
 
   function validar(): string | undefined {
     if (fonte === 'base') return sumarioId ? undefined : 'Escolha um sumário da base.'
-    if (!texto.trim()) return fonte === 'arquivo' ? 'Importe um arquivo com o sumário.' : 'Digite o texto do sumário.'
+    if (fonte === 'arquivo') {
+      if (!arquivo?.texto.trim()) return 'Importe um arquivo com o sumário.'
+      if (!arquivo.pronto) return 'Confira a transcrição da IA e marque a confirmação antes de continuar.'
+      return undefined
+    }
+    if (!texto.trim()) return 'Digite o texto do sumário.'
     if (texto.trim().length > LIMITE_TEXTO) return `O sumário passou de ${formatarNumero.format(LIMITE_TEXTO)} caracteres.`
     return undefined
   }
@@ -115,7 +105,7 @@ export default function EnvioSumario() {
     const dados: NovaExtracao = fonte === 'base'
       ? { origem: 'base', paciente_id: pacienteId, sumario_id: sumarioId }
       : fonte === 'arquivo'
-        ? { origem: 'arquivo', paciente_id: pacienteId, nome_arquivo: nomeArquivo, texto: texto.trim() }
+        ? { origem: 'arquivo', paciente_id: pacienteId, nome_arquivo: arquivo!.nomeArquivo, texto: arquivo!.texto.trim(), ...(arquivo!.transcricaoIa ? { transcricao_ia: true } : {}) }
         : { origem: 'texto', paciente_id: pacienteId, texto: texto.trim() }
 
     setErro(null)
@@ -214,25 +204,7 @@ export default function EnvioSumario() {
               ) : null}
             </div>
           ) : fonte === 'arquivo' ? (
-            <div className="flex flex-col gap-3">
-              <label htmlFor={`${id}-arquivo`} className="text-[0.9375rem] font-semibold">Arquivo do sumário (.txt ou PDF)</label>
-              <input
-                id={`${id}-arquivo`}
-                ref={refArquivo}
-                type="file"
-                accept=".txt,.pdf,text/plain,application/pdf"
-                aria-describedby={`${id}-arquivo-ajuda`}
-                onChange={(evento) => void importarArquivo(evento.target.files?.[0])}
-                className="foco min-h-12 max-w-xl rounded-lg border border-dashed border-borda-campo bg-white p-2 text-sm file:mr-3 file:min-h-9 file:rounded-md file:border-0 file:bg-marca file:px-3 file:font-semibold file:text-white"
-              />
-              <p id={`${id}-arquivo-ajuda`} className="text-sm text-texto-suave">
-                O arquivo é lido no seu navegador; só o texto extraído segue para a análise. PDFs digitalizados, sem texto selecionável,
-                não têm OCR nesta versão.
-              </p>
-              {lendoArquivo ? <p role="status" className="text-sm text-texto-suave">Lendo arquivo…</p> : null}
-              {nomeArquivo ? <p className="text-sm font-semibold text-sucesso">Arquivo lido: {nomeArquivo}</p> : null}
-              {texto ? <pre aria-label="Texto lido do arquivo" className="max-h-72 overflow-auto rounded-lg border bg-superficie p-4 font-sans text-sm leading-relaxed whitespace-pre-wrap">{texto}</pre> : null}
-            </div>
+            <ImportarArquivo refEntrada={refArquivo} aoMudar={setArquivo} />
           ) : (
             <div className="flex flex-col gap-2">
               <label htmlFor={`${id}-texto`} className="text-[0.9375rem] font-semibold">Texto do sumário de alta</label>
@@ -267,7 +239,7 @@ export default function EnvioSumario() {
 
           <div className="flex flex-wrap items-center gap-4 border-t pt-5">
             <button type="submit" disabled={ocupado} className="botao-primario min-h-12 px-6">
-              {enviando ? 'Extraindo…' : lendoArquivo ? 'Lendo arquivo…' : modoDemonstracao ? 'Gerar sugestões' : 'Extrair com IA'}
+              {enviando ? 'Extraindo…' : modoDemonstracao ? 'Gerar sugestões' : 'Extrair com IA'}
             </button>
             <p className="max-w-[60ch] text-sm text-texto-suave">
               Use somente sumários fictícios. O resultado fica pendente até a sua revisão e aprovação.

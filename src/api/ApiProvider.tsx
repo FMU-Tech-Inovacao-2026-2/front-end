@@ -1,8 +1,10 @@
 import { createContext, useContext, type ReactNode } from 'react'
 import type { ApiAlta } from './alta'
+import type { ApiPacientes } from './pacientes'
 
 export interface Apis {
   alta: ApiAlta
+  pacientes: ApiPacientes
 }
 
 const ContextoApi = createContext<Apis | null>(null)

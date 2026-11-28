@@ -10,17 +10,18 @@ interface Opcoes {
 export interface ClienteHttp {
   get<T>(caminho: string): Promise<T>
   post<T>(caminho: string, corpo: unknown): Promise<T>
+  patch<T>(caminho: string, corpo: unknown): Promise<T>
 }
 
 interface CorpoDeErro {
-  erro?: { codigo?: string; mensagem?: string }
+  erro?: { codigo?: string; mensagem?: string; detalhes?: { campo: string; mensagem: string }[] }
 }
 
 async function lerErro(resposta: Response): Promise<ErroApi> {
   const corpo = (await resposta.json().catch(() => null)) as CorpoDeErro | null
   const codigo = corpo?.erro?.codigo ?? 'erro'
   const mensagem = corpo?.erro?.mensagem ?? MENSAGEM_ERRO_GENERICO
-  return new ErroApi(codigo, mensagem, resposta.status)
+  return new ErroApi(codigo, mensagem, resposta.status, corpo?.erro?.detalhes ?? [])
 }
 
 /**
@@ -30,7 +31,7 @@ async function lerErro(resposta: Response): Promise<ErroApi> {
 export function criarClienteHttp({ urlBase, obterToken }: Opcoes): ClienteHttp {
   const base = urlBase.replace(/\/+$/, '')
 
-  async function requisitar<T>(metodo: 'GET' | 'POST', caminho: string, corpo?: unknown): Promise<T> {
+  async function requisitar<T>(metodo: 'GET' | 'POST' | 'PATCH', caminho: string, corpo?: unknown): Promise<T> {
     const token = await obterToken()
     const cabecalhos = new Headers({ Accept: 'application/json' })
     if (token) cabecalhos.set('Authorization', `Bearer ${token}`)
@@ -54,5 +55,6 @@ export function criarClienteHttp({ urlBase, obterToken }: Opcoes): ClienteHttp {
   return {
     get: (caminho) => requisitar('GET', caminho),
     post: (caminho, corpo) => requisitar('POST', caminho, corpo),
+    patch: (caminho, corpo) => requisitar('PATCH', caminho, corpo),
   }
 }

@@ -15,7 +15,7 @@ export function Cabecalho() {
   }
 
   const links = usuario?.perfil === 'profissional'
-    ? [{ para: '/', rotulo: 'Início' }, { para: '/alta/novo', rotulo: 'Nova alta' }]
+    ? [{ para: '/', rotulo: 'Início' }, { para: '/pacientes', rotulo: 'Pacientes' }, { para: '/alta/novo', rotulo: 'Nova alta' }]
     : usuario?.perfil === 'paciente'
       ? [{ para: '/', rotulo: 'Início' }, { para: '/alta/meu-plano', rotulo: 'Meu plano' }]
       : []
@@ -39,7 +39,7 @@ export function Cabecalho() {
                   <li key={link.para}>
                     <NavLink
                       to={link.para}
-                      end
+                      end={link.para === '/'}
                       className={({ isActive }) =>
                         `foco inline-flex min-h-11 items-center rounded-lg px-3 text-[0.9375rem] font-semibold ${isActive ? 'bg-destaque-fundo text-destaque-escuro' : 'text-texto-suave hover:bg-superficie hover:text-marca'}`
                       }

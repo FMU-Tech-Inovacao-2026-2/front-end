@@ -8,7 +8,7 @@ import type { ApiAlta } from '../../api/alta'
 import { criarApiAltaDemonstracao } from '../../api/demonstracao'
 import { AuthProvider } from '../../auth/AuthProvider'
 import type { ClienteAuth, Perfil } from '../../auth/tipos'
-import { criarApiAltaFalsa, PACIENTE_TESTE } from '../../test/altaFixtures'
+import { criarApiAltaFalsa, criarApisFalsas, PACIENTE_TESTE } from '../../test/altaFixtures'
 
 function loginFalso(perfil: Perfil, modoDemonstracao = false): ClienteAuth {
   return {
@@ -25,7 +25,7 @@ function abrir(api: ApiAlta, { perfil = 'profissional', demo = false, caminho = 
   const usuario = userEvent.setup()
   render(
     <AuthProvider cliente={loginFalso(perfil, demo)}>
-      <ApiProvider apis={{ alta: api }}>
+      <ApiProvider apis={criarApisFalsas(api)}>
         <MemoryRouter initialEntries={[caminho]}><Rotas /></MemoryRouter>
       </ApiProvider>
     </AuthProvider>,
