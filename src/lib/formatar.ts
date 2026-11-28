@@ -15,6 +15,21 @@ export function formatarDataHora(iso: string): string {
   return Number.isNaN(valor.getTime()) ? '—' : `${data.format(valor)} às ${hora.format(valor)}`
 }
 
+/** "1958-03-14" → "14/03/1958", sem conversão de fuso (é uma data de calendário). */
+export function formatarDataCivil(aaaaMmDd: string): string {
+  const [ano, mes, dia] = aaaaMmDd.split('-')
+  return ano && mes && dia ? `${dia}/${mes}/${ano}` : '—'
+}
+
+/** Idade em anos completos a partir de uma data AAAA-MM-DD. */
+export function idade(aaaaMmDd: string, hoje = new Date()): number | null {
+  const [ano, mes, dia] = aaaaMmDd.split('-').map(Number)
+  if (!ano || !mes || !dia) return null
+  let anos = hoje.getFullYear() - ano
+  if (hoje.getMonth() + 1 < mes || (hoje.getMonth() + 1 === mes && hoje.getDate() < dia)) anos -= 1
+  return anos >= 0 ? anos : null
+}
+
 export const formatarNumero = new Intl.NumberFormat('pt-BR')
 
 /** "1 sugestão" / "3 sugestões". */

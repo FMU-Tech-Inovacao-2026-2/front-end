@@ -4,14 +4,14 @@ import { MemoryRouter } from 'react-router'
 import { describe, expect, test } from 'vitest'
 import { Rotas } from './App'
 import { ApiProvider } from './api/ApiProvider'
-import { criarApiAltaDemonstracao } from './api/demonstracao'
+import { criarApiAltaDemonstracao, criarApiPacientesDemonstracao } from './api/demonstracao'
 import { AuthProvider } from './auth/AuthProvider'
 import { criarClienteDemonstracao } from './auth/clienteDemonstracao'
 
 function abrirApp(caminho: string) {
   render(
     <AuthProvider cliente={criarClienteDemonstracao()}>
-      <ApiProvider apis={{ alta: criarApiAltaDemonstracao() }}>
+      <ApiProvider apis={{ alta: criarApiAltaDemonstracao(), pacientes: criarApiPacientesDemonstracao() }}>
         <MemoryRouter initialEntries={[caminho]}>
           <Rotas />
         </MemoryRouter>

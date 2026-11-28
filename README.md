@@ -14,12 +14,19 @@ Abra `http://localhost:5173`. Não versione o `.env.local`. Reinicie o Vite semp
 
 ## Fluxo
 
-**Profissional**
+**Fichário de pacientes** (menu "Pacientes")
+
+- Busque por nome ou prontuário e cadastre pacientes. O cadastro mostra uma senha provisória uma única vez.
+- A ficha reúne dados cadastrais (editáveis), plano vigente, sumários de alta e histórico de altas.
+- Em "Adicionar sumário", digite o texto ou importe TXT/PDF. PDF com texto é lido no navegador. PDF digitalizado (ou com texto desorganizado) pode ser transcrito pela IA: o texto aparece para conferência, com link para abrir o PDF original, e só é aceito depois que você confirma que conferiu.
+- Em cada sumário, "Gerar plano de alta" leva direto à revisão das sugestões.
+
+**Profissional — Alta Assistida**
 
 1. **Paciente e sumário**: escolha o paciente e um sumário da base, importe TXT/PDF ou digite o texto.
-2. **Sugestões da IA**: o sumário aparece ao lado das sugestões. “Mostrar no sumário” destaca o trecho citado. Cada item precisa de uma decisão explícita: aceitar, reprovar ou editar. Itens com citação inexistente chegam reprovados e não podem ser aceitos.
+2. **Sugestões da IA**: a tela mostra o modelo e o tempo de geração. O sumário aparece ao lado das sugestões. “Mostrar no sumário” destaca o trecho citado. Cada item precisa de uma decisão explícita: aceitar, reprovar ou editar. Reprovar exige um motivo (há atalhos para os mais comuns). Itens com citação inexistente chegam reprovados e não podem ser aceitos.
 3. **Revisão final e aceite**: lista do que o paciente vai receber e termo de aceite carregado do servidor. Todas as declarações são obrigatórias, inclusive a ciência de que a IA pode errar e a finalidade conforme a LGPD.
-4. **Comprovante**: profissional, data e hora, versão do termo, declarações e hash SHA-256 do conteúdo. Pode ser impresso e reaberto pelo início.
+4. **Comprovante**: profissional, data e hora, versão do termo, declarações, reprovações com motivo e hash SHA-256 do conteúdo. Pode ser impresso e reaberto pelo início.
 
 As decisões ficam salvas por extração na aba (`sessionStorage`). Ao recarregar a página nada se perde, e a revisão final nunca presume itens aprovados.
 
@@ -84,4 +91,4 @@ npm run lint
 - Sugestões só chegam ao paciente após revisão e aceite de um profissional. A IA organiza o texto; não diagnostica nem recomenda tratamento.
 - Restrições de tela por perfil melhoram a experiência, mas a autorização é feita pelo back-end em cada rota.
 
-O contrato de rotas e payloads está em `PitchInicial/pitchInicial/docs/contrato-api.md`.
+O contrato de rotas e payloads está em `PitchInicial/pitchInicial/docs/contrato-api.md`. Arquitetura e LGPD estão em `docs/arquitetura.md` e `docs/dados-e-seguranca.md` no mesmo repositório. Mudanças por versão: `CHANGELOG.md`.

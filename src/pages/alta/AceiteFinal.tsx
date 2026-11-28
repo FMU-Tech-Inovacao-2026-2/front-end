@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { useApi } from '../../api/ApiProvider'
-import type { ExtracaoAlta, PlanoAlta, SugestaoAlta, TermoAceite } from '../../api/alta'
+import type { ExtracaoAlta, PlanoComReprovacoes, ReprovacaoRegistrada, SugestaoAlta, TermoAceite } from '../../api/alta'
 import { ErroApi } from '../../api/erros'
 import { useTratarErro } from '../../api/useTratarErro'
 import { useAuth } from '../../auth/AuthProvider'
@@ -21,7 +21,7 @@ export default function AceiteFinal() {
 
   const [extracao, setExtracao] = useState<ExtracaoAlta | null>(null)
   const [termo, setTermo] = useState<TermoAceite | null>(null)
-  const [plano, setPlano] = useState<PlanoAlta | null>(null)
+  const [plano, setPlano] = useState<PlanoComReprovacoes | null>(null)
   const [marcadas, setMarcadas] = useState<string[]>([])
   const [carregando, setCarregando] = useState(true)
   const [enviando, setEnviando] = useState(false)
@@ -65,7 +65,12 @@ export default function AceiteFinal() {
   }
 
   const rascunho = lerRascunho(extracao.id)
-  const { itens: idsAceitos, edicoes } = rascunho ? paraAprovacao(rascunho) : { itens: [], edicoes: [] }
+  const verificados = new Set(extracao.sugestoes.filter((item) => item.origem_verificada).map((item) => item.id))
+  const { itens: idsAceitos, edicoes, reprovados } = rascunho ? paraAprovacao(rascunho, verificados) : { itens: [] as string[], edicoes: [], reprovados: [] }
+  const motivoPorId = new Map(reprovados.map((item) => [item.id, item.motivo]))
+  const listaReprovadas = extracao.sugestoes
+    .filter((item) => !idsAceitos.includes(item.id))
+    .map((item) => ({ ...item, motivo: motivoPorId.get(item.id) ?? (item.origem_verificada ? '' : 'Origem não confirmada (bloqueio automático do servidor).') }))
   const voltarParaRevisao = `/alta/extracoes/${encodeURIComponent(extracao.id)}`
 
   // Sem decisões registradas (ex.: link aberto direto), não há o que aprovar: nada é presumido.
@@ -90,7 +95,6 @@ export default function AceiteFinal() {
       const editado = Boolean(edicao) && (edicao!.titulo !== item.titulo || edicao!.descricao !== item.descricao)
       return edicao ? { ...item, titulo: edicao.titulo, descricao: edicao.descricao, editado } : { ...item, editado: false }
     })
-  const reprovadas = extracao.sugestoes.length - itensFinais.length
   const todasMarcadas = termo.declaracoes.every((declaracao) => marcadas.includes(declaracao.id))
   const termoAtual = termo
 
@@ -110,6 +114,7 @@ export default function AceiteFinal() {
       const resultado = await alta.aprovarExtracao(extracao.id, {
         itens_aprovados: itensFinais.map((item) => item.id),
         sugestoes_editadas: edicoes.filter((item) => itensFinais.some((final) => final.id === item.id && final.editado)),
+        itens_reprovados: reprovados,
         aceite: { versao_termo: termoAtual.versao, declaracoes: marcadas },
       })
       limparRascunho(extracao.id)
@@ -146,7 +151,7 @@ export default function AceiteFinal() {
             <Link to={voltarParaRevisao} className="botao-discreto -mr-3">Alterar decisões</Link>
           </div>
           <p className="text-sm text-texto-suave">
-            {reprovadas > 0 ? `${plural(reprovadas, 'sugestão reprovada não aparece', 'sugestões reprovadas não aparecem')} aqui nem no plano.` : 'Todas as sugestões foram aceitas.'}
+            {listaReprovadas.length > 0 ? `${plural(listaReprovadas.length, 'sugestão reprovada fica', 'sugestões reprovadas ficam')} só no comprovante, com o motivo.` : 'Todas as sugestões foram aceitas.'}
           </p>
           {ORDEM_CATEGORIA.map((categoria) => {
             const doGrupo = itensFinais.filter((item) => item.categoria === categoria)
@@ -169,6 +174,7 @@ export default function AceiteFinal() {
               </div>
             )
           })}
+          {listaReprovadas.length > 0 ? <ListaReprovacoes itens={listaReprovadas} /> : null}
         </section>
 
         <section aria-labelledby="titulo-termo" className="cartao flex flex-col gap-4 p-5 lg:sticky lg:top-4">
@@ -218,7 +224,24 @@ export default function AceiteFinal() {
   )
 }
 
-function Comprovante({ plano, modoDemonstracao }: { plano: PlanoAlta; modoDemonstracao: boolean }) {
+/** Reprovações e motivos (salvaguarda G2). Visível só ao profissional. */
+function ListaReprovacoes({ itens }: { itens: Array<Pick<ReprovacaoRegistrada, 'id' | 'categoria' | 'titulo' | 'motivo'> & { automatica?: boolean }> }) {
+  return (
+    <div className="flex flex-col gap-2 border-t pt-4">
+      <h3 className="text-sm font-semibold tracking-wide text-texto-suave uppercase">Reprovadas ({itens.length})</h3>
+      <ul className="grid gap-2">
+        {itens.map((item) => (
+          <li key={item.id} className="rounded-lg border border-erro/20 bg-erro-fundo/40 p-3 text-sm">
+            <p><span className="font-semibold">{item.titulo}</span> <span className="text-texto-suave">· {ROTULO_CATEGORIA[item.categoria]}</span></p>
+            <p className="mt-1 text-texto-suave">Motivo: {item.motivo || '—'}{item.automatica ? ' (automático)' : ''}</p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function Comprovante({ plano, modoDemonstracao }: { plano: PlanoComReprovacoes; modoDemonstracao: boolean }) {
   const aceite = plano.aceite
   return (
     <Pagina titulo="Plano aprovado">
@@ -273,6 +296,7 @@ function Comprovante({ plano, modoDemonstracao }: { plano: PlanoAlta; modoDemons
               </li>
             ))}
           </ul>
+          {plano.reprovacoes?.length ? <ListaReprovacoes itens={plano.reprovacoes} /> : null}
         </section>
       </div>
 

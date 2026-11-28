@@ -10,7 +10,19 @@ export type Decisao = 'aceita' | 'reprovada'
 export interface RascunhoRevisao {
   decisoes: Record<string, Decisao>
   edicoes: Record<string, EdicaoSugestaoAlta>
+  /** Motivo de cada reprovação (salvaguarda G2). */
+  motivos: Record<string, string>
 }
+
+/** Motivos frequentes, oferecidos como atalho. O profissional pode escrever outro. */
+export const MOTIVOS_FREQUENTES = [
+  'Informação incorreta ou mal interpretada',
+  'Item duplicado',
+  'Não se aplica a este paciente',
+  'Orientação será dada por outro meio',
+]
+
+export const MOTIVO_MINIMO = 3
 
 const prefixo = 'healthia:alta:rascunho:'
 const memoria = new Map<string, RascunhoRevisao>()
@@ -18,7 +30,7 @@ const memoria = new Map<string, RascunhoRevisao>()
 export function lerRascunho(extracaoId: string): RascunhoRevisao | null {
   try {
     const bruto = sessionStorage.getItem(prefixo + extracaoId)
-    if (bruto) return JSON.parse(bruto) as RascunhoRevisao
+    if (bruto) return { motivos: {}, ...(JSON.parse(bruto) as Partial<RascunhoRevisao>) } as RascunhoRevisao
   } catch {
     // Sem armazenamento: usa a cópia em memória.
   }
@@ -43,9 +55,15 @@ export function limparRascunho(extracaoId: string) {
   }
 }
 
-/** IDs aceitos e edições só dos itens aceitos, no formato da API. */
-export function paraAprovacao(rascunho: RascunhoRevisao) {
+/**
+ * IDs aceitos, edições só dos aceitos e reprovações com motivo, no formato da API.
+ * Itens sem origem confirmada não entram em `reprovados`: o servidor os reprova sozinho.
+ */
+export function paraAprovacao(rascunho: RascunhoRevisao, verificados: Set<string>) {
   const itens = Object.entries(rascunho.decisoes).filter(([, decisao]) => decisao === 'aceita').map(([id]) => id)
   const edicoes = Object.values(rascunho.edicoes).filter((edicao) => itens.includes(edicao.id))
-  return { itens, edicoes }
+  const reprovados = Object.entries(rascunho.decisoes)
+    .filter(([id, decisao]) => decisao === 'reprovada' && verificados.has(id))
+    .map(([id]) => ({ id, motivo: (rascunho.motivos[id] ?? '').trim() }))
+  return { itens, edicoes, reprovados }
 }

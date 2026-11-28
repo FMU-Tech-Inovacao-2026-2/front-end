@@ -1,4 +1,6 @@
+import type { Apis } from '../api/ApiProvider'
 import type { ApiAlta, ExtracaoAlta, Paciente, PlanoAlta, SumarioBase, TermoAceite } from '../api/alta'
+import type { ApiPacientes, FichaPaciente } from '../api/pacientes'
 
 export const PACIENTE_TESTE: Paciente = { id: 'u-002', nome: 'Paciente Fictício', email: 'paciente@demo.healthia', role: 'paciente' }
 export const SUMARIO_TESTE: SumarioBase = {
@@ -63,7 +65,37 @@ export function criarApiAltaFalsa(overrides: Partial<ApiAlta> = {}) {
     aprovarExtracao: async () => PLANO_TESTE,
     planoDaExtracao: async () => PLANO_TESTE,
     meuPlano: async () => PLANO_TESTE,
+    transcreverPdf: async () => ({ texto: 'Transcrição fictícia.', modelo: 'modelo-teste', transcricao_ia: true }),
     ...overrides,
   }
   return { api, chamadas }
+}
+
+export const FICHA_TESTE: FichaPaciente = {
+  id: PACIENTE_TESTE.id,
+  nome: PACIENTE_TESTE.nome,
+  email: PACIENTE_TESTE.email,
+  data_nascimento: '1960-01-01',
+  numero_prontuario: 'PAC-TESTE',
+  criado_em: '2026-11-27T12:00:00.000Z',
+}
+
+export function criarApiPacientesFalsa(overrides: Partial<ApiPacientes> = {}): ApiPacientes {
+  return {
+    listar: async () => [{ ...FICHA_TESTE, total_sumarios: 0 }],
+    criar: async (dados) => ({ paciente: { ...FICHA_TESTE, ...dados }, senha_provisoria: 'Senha-Teste-123' }),
+    ficha: async () => ({ paciente: FICHA_TESTE, sumarios: [], extracoes: [], plano_vigente: null }),
+    atualizar: async (_id, dados) => ({ ...FICHA_TESTE, ...dados }),
+    criarSumario: async (pacienteId, dados) => ({
+      id: 'sumario-ficha', paciente_id: pacienteId, titulo: dados.titulo, origem: dados.origem, texto: dados.texto,
+      transcricao_ia: dados.origem === 'pdf_ia', criado_em: '2026-11-27T12:00:00.000Z', criado_por: 'u-001',
+    }),
+    buscarSumario: async () => { throw new Error('não usado') },
+    ...overrides,
+  }
+}
+
+/** APIs falsas completas para renderizar o app nos testes. */
+export function criarApisFalsas(alta: ApiAlta, pacientes: ApiPacientes = criarApiPacientesFalsa()): Apis {
+  return { alta, pacientes }
 }

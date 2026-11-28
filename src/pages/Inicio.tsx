@@ -17,6 +17,7 @@ interface Modulo {
 }
 
 const MODULOS_PROFISSIONAL: Modulo[] = [
+  { nome: 'Fichário de pacientes', descricao: 'Cadastro, sumários de alta (inclusive PDF lido pela IA) e histórico de cada paciente.', rota: '/pacientes' },
   { nome: 'Alta Assistida', descricao: 'Transforma o sumário de alta num plano de cuidados que o paciente segue em casa.', rota: '/alta/novo' },
   { nome: 'Prescrição Assistida', descricao: 'Estrutura a prescrição, confere a origem de cada item e avisa sobre alergias.' },
   { nome: 'Paciente Assistido', descricao: 'Chat com o histórico do paciente, sempre com a fonte de cada resposta.' },
@@ -71,7 +72,10 @@ function InicioProfissional({ nome }: { nome?: string }) {
             {pendentes > 0 ? `Você tem ${pendentes} alta(s) aguardando sua revisão.` : 'Nenhuma alta aguardando revisão.'}
           </p>
         </div>
-        <Link to="/alta/novo" className="botao-primario min-h-12 px-6">Nova alta</Link>
+        <div className="flex flex-wrap gap-3">
+          <Link to="/pacientes" className="botao-secundario min-h-12">Pacientes</Link>
+          <Link to="/alta/novo" className="botao-primario min-h-12 px-6">Nova alta</Link>
+        </div>
       </div>
 
       {modoDemonstracao ? (
@@ -132,7 +136,7 @@ function InicioProfissional({ nome }: { nome?: string }) {
 
       <section aria-labelledby="titulo-modulos" className="flex flex-col gap-3">
         <h2 id="titulo-modulos" className="text-xl font-semibold">Módulos</h2>
-        <ul className="grid gap-3 md:grid-cols-3">
+        <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {MODULOS_PROFISSIONAL.map((modulo) => (
             <li key={modulo.nome}>
               {modulo.rota ? (

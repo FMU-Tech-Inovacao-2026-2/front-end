@@ -1,21 +1,24 @@
 import type {
   ApiAlta,
+  DecisaoSugestao,
   ExtracaoAlta,
   NovaExtracao,
   Paciente,
   PlanoAlta,
   RegistroAceite,
+  ReprovacaoRegistrada,
   ResumoExtracao,
   SugestaoAlta,
   SumarioBase,
   TermoAceite,
 } from './alta'
 import { ErroApi } from './erros'
+import type { ApiPacientes, FichaPaciente, PacienteNaLista, SumarioPaciente } from './pacientes'
 
 /**
  * Demonstração SEM rede: reproduz no navegador as mesmas regras do back-end em
  * GEMINI_PROVEDOR=demonstracao (catálogo fictício, respostas preparadas, verificação
- * de origem, termo de aceite obrigatório e plano liberado só após aprovação).
+ * de origem, termo de aceite obrigatório, fichário e plano liberado só após aprovação).
  * Mantenha sincronizado com Backend/back-end/src/modules/alta/alta.catalogo.ts e alta.termo.ts.
  * Somente conteúdo inventado.
  */
@@ -80,6 +83,16 @@ export const TERMO_DEMONSTRACAO: TermoAceite = {
   ],
 }
 
+const FICHA_INICIAL: FichaPaciente = {
+  id: PACIENTE_DEMONSTRACAO.id,
+  nome: PACIENTE_DEMONSTRACAO.nome,
+  email: PACIENTE_DEMONSTRACAO.email,
+  data_nascimento: '1958-03-14',
+  numero_prontuario: 'PAC-0042',
+  responsavel: 'Familiar Demo (fictício)',
+  criado_em: '2026-11-01T12:00:00.000Z',
+}
+
 /** Mesma regra do servidor: a citação precisa existir no texto original. */
 function normalizar(texto: string) {
   return texto
@@ -99,15 +112,18 @@ export function origemConfere(trecho: string, textoOriginal: string) {
 interface EstadoDemonstracao {
   extracoes: ExtracaoAlta[]
   planos: PlanoAlta[]
+  fichas: FichaPaciente[]
+  sumarios: SumarioPaciente[]
 }
 
 const CHAVE = 'healthia:demo:alta'
-let memoria: EstadoDemonstracao = { extracoes: [], planos: [] }
+const estadoInicial = (): EstadoDemonstracao => ({ extracoes: [], planos: [], fichas: [structuredClone(FICHA_INICIAL)], sumarios: [] })
+let memoria: EstadoDemonstracao = estadoInicial()
 
 function ler(): EstadoDemonstracao {
   try {
     const bruto = sessionStorage.getItem(CHAVE)
-    if (bruto) memoria = JSON.parse(bruto) as EstadoDemonstracao
+    if (bruto) memoria = { ...estadoInicial(), ...(JSON.parse(bruto) as Partial<EstadoDemonstracao>) }
   } catch {
     // Sem armazenamento: a demonstração continua em memória até recarregar.
   }
@@ -123,18 +139,19 @@ function gravar(estado: EstadoDemonstracao) {
   }
 }
 
-/** Apaga extrações e planos da demonstração (botão "Reiniciar demonstração"). */
+/** Volta a demonstração ao estado inicial (botão "Reiniciar demonstração"). */
 export function reiniciarDemonstracao() {
-  gravar({ extracoes: [], planos: [] })
+  gravar(estadoInicial())
 }
 
 const novoId = () => globalThis.crypto?.randomUUID?.() ?? `demo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
-async function hashDoConteudo(extracaoId: string, versao: string, itens: SugestaoAlta[]) {
+async function hashDoConteudo(extracaoId: string, versao: string, itens: SugestaoAlta[], reprovacoes: ReprovacaoRegistrada[]) {
   const canonico = JSON.stringify({
     extracao_id: extracaoId,
     versao_termo: versao,
     itens: itens.map(({ id, categoria, titulo, descricao, trecho_origem }) => ({ id, categoria, titulo, descricao, trecho_origem })),
+    reprovacoes: reprovacoes.map(({ id, motivo, automatica }) => ({ id, motivo, automatica })),
   })
   try {
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonico))
@@ -145,14 +162,56 @@ async function hashDoConteudo(extracaoId: string, versao: string, itens: Sugesta
 }
 
 const erro = (status: number, codigo: string, mensagem: string) => new ErroApi(codigo, mensagem, status)
+const MOTIVO_AUTOMATICO = 'Origem não confirmada no texto original (bloqueio automático do servidor).'
 
-function textoDaEntrada(dados: NovaExtracao) {
+function reprovacoesDe(extracao: ExtracaoAlta): ReprovacaoRegistrada[] {
+  return (extracao.decisoes ?? []).filter((d) => d.decisao === 'reprovada').flatMap((d) => {
+    const s = extracao.sugestoes.find((item) => item.id === d.id)
+    return s ? [{ id: s.id, categoria: s.categoria, titulo: s.titulo, trecho_origem: s.trecho_origem, motivo: d.motivo ?? '', automatica: d.automatica }] : []
+  })
+}
+const PDF_SEM_IA = 'Leitura de PDF pela IA exige a IA configurada no servidor. Na demonstração, use PDFs com texto selecionável ou um sumário da base.'
+
+interface Entrada {
+  texto: string
+  sumarioId?: string
+  sumarioPacienteId?: string
+  nomeArquivo?: string
+  transcricaoIa: boolean
+}
+
+function lerEntrada(dados: NovaExtracao, estado: EstadoDemonstracao): Entrada {
   if (dados.origem === 'base') {
     const sumario = SUMARIOS_DEMONSTRACAO.find((item) => item.id === dados.sumario_id)
     if (!sumario) throw erro(404, 'NAO_ENCONTRADO', 'Sumário de exemplo não encontrado')
-    return { texto: sumario.texto, sumarioId: sumario.id }
+    return { texto: sumario.texto, sumarioId: sumario.id, transcricaoIa: false }
   }
-  return { texto: dados.texto.trim(), sumarioId: undefined }
+  if (dados.origem === 'ficha') {
+    const sumario = estado.sumarios.find((item) => item.id === dados.sumario_id && item.paciente_id === dados.paciente_id)
+    if (!sumario) throw erro(404, 'NAO_ENCONTRADO', 'Sumário não encontrado na ficha deste paciente')
+    return { texto: sumario.texto, sumarioPacienteId: sumario.id, nomeArquivo: sumario.nome_arquivo, transcricaoIa: sumario.transcricao_ia }
+  }
+  if (dados.origem === 'arquivo') {
+    return { texto: dados.texto.trim(), nomeArquivo: dados.nome_arquivo, transcricaoIa: dados.transcricao_ia === true }
+  }
+  return { texto: dados.texto.trim(), transcricaoIa: false }
+}
+
+function resumir(item: ExtracaoAlta, estado: EstadoDemonstracao): ResumoExtracao {
+  return {
+    id: item.id,
+    paciente_id: item.paciente_id,
+    paciente_nome: estado.fichas.find((f) => f.id === item.paciente_id)?.nome ?? 'Paciente',
+    origem: item.origem ?? 'base',
+    titulo: SUMARIOS_DEMONSTRACAO.find((s) => s.id === item.sumario_id)?.titulo
+      ?? estado.sumarios.find((s) => s.id === item.sumario_paciente_id)?.titulo
+      ?? item.nome_arquivo ?? 'Texto digitado',
+    status: item.status,
+    total_sugestoes: item.sugestoes.length,
+    total_aprovadas: item.itens_aprovados?.length ?? 0,
+    criado_em: item.criado_em,
+    ...(item.aprovado_em ? { aprovado_em: item.aprovado_em } : {}),
+  }
 }
 
 export function criarApiAltaDemonstracao(): ApiAlta {
@@ -164,49 +223,40 @@ export function criarApiAltaDemonstracao(): ApiAlta {
 
   return {
     async listarPacientes() {
-      return [structuredClone(PACIENTE_DEMONSTRACAO)]
+      return ler().fichas.map((ficha) => ({ id: ficha.id, nome: ficha.nome, email: ficha.email, role: 'paciente' as const }))
     },
     async listarSumarios() {
       return structuredClone(SUMARIOS_DEMONSTRACAO)
     },
-    async listarExtracoes(): Promise<ResumoExtracao[]> {
-      return ler().extracoes
-        .sort((a, b) => b.criado_em.localeCompare(a.criado_em))
-        .map((item) => ({
-          id: item.id,
-          paciente_id: item.paciente_id,
-          paciente_nome: PACIENTE_DEMONSTRACAO.nome,
-          origem: item.origem ?? 'base',
-          titulo: SUMARIOS_DEMONSTRACAO.find((s) => s.id === item.sumario_id)?.titulo ?? item.nome_arquivo ?? 'Texto digitado',
-          status: item.status,
-          total_sugestoes: item.sugestoes.length,
-          total_aprovadas: item.itens_aprovados?.length ?? 0,
-          criado_em: item.criado_em,
-          ...(item.aprovado_em ? { aprovado_em: item.aprovado_em } : {}),
-        }))
+    async listarExtracoes() {
+      const estado = ler()
+      return estado.extracoes.sort((a, b) => b.criado_em.localeCompare(a.criado_em)).map((item) => resumir(item, estado))
     },
     async criarExtracao(dados) {
-      if (dados.paciente_id !== PACIENTE_DEMONSTRACAO.id) throw erro(404, 'NAO_ENCONTRADO', 'Paciente não encontrado')
-      const { texto, sumarioId } = textoDaEntrada(dados)
-      const sumario = SUMARIOS_DEMONSTRACAO.find((item) => item.texto.trim() === texto.trim())
+      const estado = ler()
+      if (!estado.fichas.some((item) => item.id === dados.paciente_id)) throw erro(404, 'NAO_ENCONTRADO', 'Paciente não encontrado')
+      const entrada = lerEntrada(dados, estado)
+      const sumario = SUMARIOS_DEMONSTRACAO.find((item) => item.texto.trim() === entrada.texto.trim())
       const resposta = sumario ? RESPOSTAS[sumario.id] : undefined
       if (!resposta) {
         throw erro(503, 'SERVICO_INDISPONIVEL', 'Este ambiente está em modo demonstração: escolha um sumário da base. Textos livres exigem a IA configurada.')
       }
       const extracao: ExtracaoAlta = {
         id: novoId(),
-        paciente_id: PACIENTE_DEMONSTRACAO.id,
+        paciente_id: dados.paciente_id,
         profissional_id: PROFISSIONAL_DEMONSTRACAO.id,
         origem: dados.origem,
-        ...(sumarioId ?? sumario?.id ? { sumario_id: sumarioId ?? sumario?.id } : {}),
-        ...(dados.origem === 'arquivo' ? { nome_arquivo: dados.nome_arquivo } : {}),
-        texto_original: texto,
+        ...(entrada.sumarioId ? { sumario_id: entrada.sumarioId } : {}),
+        ...(entrada.sumarioPacienteId ? { sumario_paciente_id: entrada.sumarioPacienteId } : {}),
+        ...(entrada.nomeArquivo ? { nome_arquivo: entrada.nomeArquivo } : {}),
+        ...(entrada.transcricaoIa ? { transcricao_ia: true } : {}),
+        texto_original: entrada.texto,
         status: 'pendente',
-        sugestoes: resposta.sugestoes.map((item) => ({ ...item, id: novoId(), origem_verificada: origemConfere(item.trecho_origem, texto) })),
+        sugestoes: resposta.sugestoes.map((item) => ({ ...item, id: novoId(), origem_verificada: origemConfere(item.trecho_origem, entrada.texto) })),
         nao_informado: [...resposta.nao_informado],
         criado_em: new Date().toISOString(),
+        ia: { modelo: 'demonstracao', tokens_entrada: 0, tokens_saida: 0, duracao_ms: 0, reparos: 0 },
       }
-      const estado = ler()
       gravar({ ...estado, extracoes: [...estado.extracoes, extracao] })
       return structuredClone(extracao)
     },
@@ -216,7 +266,7 @@ export function criarApiAltaDemonstracao(): ApiAlta {
     async termoAceite() {
       return structuredClone(TERMO_DEMONSTRACAO)
     },
-    async aprovarExtracao(id, { itens_aprovados, sugestoes_editadas, aceite }) {
+    async aprovarExtracao(id, { itens_aprovados, itens_reprovados, sugestoes_editadas, aceite }) {
       const extracao = buscar(id)
       if (extracao.status !== 'pendente') throw erro(409, 'CONFLITO', 'Esta extração já foi aprovada.')
       if (aceite.versao_termo !== TERMO_DEMONSTRACAO.versao) {
@@ -239,6 +289,23 @@ export function criarApiAltaDemonstracao(): ApiAlta {
       if (itens.some((item) => !item.origem_verificada)) {
         throw erro(403, 'SEM_PERMISSAO', 'Há sugestões sem trecho de origem confirmado. Elas não podem ser aprovadas.')
       }
+      // Mesma salvaguarda G2 do servidor: toda sugestão não aprovada precisa de motivo.
+      const motivos = new Map(itens_reprovados.map((item) => [item.id, item.motivo.trim()]))
+      const decisoes: DecisaoSugestao[] = []
+      const reprovacoes: ReprovacaoRegistrada[] = []
+      const semMotivo: string[] = []
+      for (const s of extracao.sugestoes) {
+        if (ids.has(s.id)) {
+          decisoes.push({ id: s.id, decisao: 'aprovada', automatica: false, editada: edicoes.has(s.id) })
+          continue
+        }
+        const automatica = !s.origem_verificada
+        const motivo = motivos.get(s.id) || (automatica ? MOTIVO_AUTOMATICO : '')
+        if (motivo.length < 3) { semMotivo.push(s.titulo); continue }
+        decisoes.push({ id: s.id, decisao: 'reprovada', motivo, automatica, editada: false })
+        reprovacoes.push({ id: s.id, categoria: s.categoria, titulo: s.titulo, trecho_origem: s.trecho_origem, motivo, automatica })
+      }
+      if (semMotivo.length) throw erro(400, 'DADOS_INVALIDOS', `Informe o motivo da reprovação de: ${semMotivo.join('; ')}.`)
 
       const agora = new Date().toISOString()
       const registro: RegistroAceite = {
@@ -247,7 +314,7 @@ export function criarApiAltaDemonstracao(): ApiAlta {
         profissional_id: PROFISSIONAL_DEMONSTRACAO.id,
         profissional_nome: PROFISSIONAL_DEMONSTRACAO.nome,
         registrado_em: agora,
-        hash_conteudo: await hashDoConteudo(extracao.id, TERMO_DEMONSTRACAO.versao, itens),
+        hash_conteudo: await hashDoConteudo(extracao.id, TERMO_DEMONSTRACAO.versao, itens, reprovacoes),
       }
       const plano: PlanoAlta = {
         id: novoId(),
@@ -260,22 +327,111 @@ export function criarApiAltaDemonstracao(): ApiAlta {
       }
       const estado = ler()
       gravar({
+        ...estado,
         planos: [...estado.planos, plano],
         extracoes: estado.extracoes.map((item) =>
-          item.id === extracao.id ? { ...item, status: 'aprovado', itens_aprovados: [...ids], plano_id: plano.id, aprovado_em: agora } : item,
+          item.id === extracao.id ? { ...item, status: 'aprovado', itens_aprovados: [...ids], decisoes, plano_id: plano.id, aprovado_em: agora } : item,
         ),
       })
-      return structuredClone(plano)
+      return structuredClone({ ...plano, reprovacoes })
     },
     async planoDaExtracao(id) {
       const extracao = buscar(id)
       const plano = ler().planos.find((item) => item.id === extracao.plano_id)
       if (!plano) throw erro(404, 'NAO_ENCONTRADO', 'Esta extração ainda não tem plano aprovado.')
-      return structuredClone(plano)
+      return structuredClone({ ...plano, reprovacoes: reprovacoesDe(extracao) })
     },
     async meuPlano() {
       const planos = ler().planos.filter((item) => item.paciente_id === PACIENTE_DEMONSTRACAO.id)
       return planos.length ? structuredClone(planos[planos.length - 1]) : null
+    },
+    async transcreverPdf() {
+      throw erro(503, 'SERVICO_INDISPONIVEL', PDF_SEM_IA)
+    },
+  }
+}
+
+/** Fichário da demonstração, no navegador, com as mesmas validações do servidor. */
+export function criarApiPacientesDemonstracao(): ApiPacientes {
+  function buscar(id: string) {
+    const ficha = ler().fichas.find((item) => item.id === id)
+    if (!ficha) throw erro(404, 'NAO_ENCONTRADO', 'Paciente não encontrado')
+    return ficha
+  }
+  const prontuarioEmUso = (numero: string, exceto?: string) =>
+    ler().fichas.some((item) => item.numero_prontuario.toUpperCase() === numero.trim().toUpperCase() && item.id !== exceto)
+
+  return {
+    async listar(busca) {
+      const termo = busca?.trim().toLocaleLowerCase('pt-BR')
+      const estado = ler()
+      return estado.fichas
+        .filter((f) => !termo || f.nome.toLocaleLowerCase('pt-BR').includes(termo) || f.numero_prontuario.toLowerCase().includes(termo))
+        .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+        .map((f): PacienteNaLista => {
+          const sumarios = estado.sumarios.filter((s) => s.paciente_id === f.id).sort((a, b) => b.criado_em.localeCompare(a.criado_em))
+          return { ...f, total_sumarios: sumarios.length, ...(sumarios[0] ? { ultimo_sumario_em: sumarios[0].criado_em } : {}) }
+        })
+    },
+    async criar(dados) {
+      const estado = ler()
+      if (estado.fichas.some((item) => item.email.toLowerCase() === dados.email.trim().toLowerCase())) throw erro(409, 'CONFLITO', 'Já existe uma conta com este e-mail.')
+      if (prontuarioEmUso(dados.numero_prontuario)) throw erro(409, 'CONFLITO', 'Já existe um paciente com este número de prontuário.')
+      const ficha: FichaPaciente = {
+        ...dados,
+        id: novoId(),
+        email: dados.email.trim().toLowerCase(),
+        numero_prontuario: dados.numero_prontuario.trim().toUpperCase(),
+        criado_em: new Date().toISOString(),
+        criado_por: PROFISSIONAL_DEMONSTRACAO.id,
+      }
+      gravar({ ...estado, fichas: [...estado.fichas, ficha] })
+      return { paciente: structuredClone(ficha), senha_provisoria: 'Sem senha na demonstração' }
+    },
+    async ficha(id) {
+      const paciente = buscar(id)
+      const estado = ler()
+      const sumarios = estado.sumarios
+        .filter((s) => s.paciente_id === id)
+        .sort((a, b) => b.criado_em.localeCompare(a.criado_em))
+        .map(({ texto, ...resto }) => ({ ...resto, caracteres: texto.length }))
+      const extracoes = estado.extracoes
+        .filter((e) => e.paciente_id === id)
+        .sort((a, b) => b.criado_em.localeCompare(a.criado_em))
+        .map((e) => resumir(e, estado))
+      const planos = estado.planos.filter((p) => p.paciente_id === id)
+      return { paciente: structuredClone(paciente), sumarios, extracoes, plano_vigente: planos.length ? structuredClone(planos[planos.length - 1]) : null }
+    },
+    async atualizar(id, dados) {
+      const atual = buscar(id)
+      if (dados.numero_prontuario && prontuarioEmUso(dados.numero_prontuario, id)) throw erro(409, 'CONFLITO', 'Já existe um paciente com este número de prontuário.')
+      const atualizada: FichaPaciente = { ...atual, ...dados, atualizado_em: new Date().toISOString() }
+      if (dados.numero_prontuario) atualizada.numero_prontuario = dados.numero_prontuario.trim().toUpperCase()
+      const estado = ler()
+      gravar({ ...estado, fichas: estado.fichas.map((f) => (f.id === id ? atualizada : f)) })
+      return structuredClone(atualizada)
+    },
+    async criarSumario(pacienteId, dados) {
+      buscar(pacienteId)
+      const sumario: SumarioPaciente = {
+        id: novoId(),
+        paciente_id: pacienteId,
+        titulo: dados.titulo,
+        origem: dados.origem,
+        ...(dados.origem !== 'texto' ? { nome_arquivo: dados.nome_arquivo } : {}),
+        texto: dados.texto.trim(),
+        transcricao_ia: dados.origem === 'pdf_ia',
+        criado_em: new Date().toISOString(),
+        criado_por: PROFISSIONAL_DEMONSTRACAO.id,
+      }
+      const estado = ler()
+      gravar({ ...estado, sumarios: [...estado.sumarios, sumario] })
+      return structuredClone(sumario)
+    },
+    async buscarSumario(pacienteId, sumarioId) {
+      const sumario = ler().sumarios.find((s) => s.id === sumarioId && s.paciente_id === pacienteId)
+      if (!sumario) throw erro(404, 'NAO_ENCONTRADO', 'Sumário não encontrado')
+      return structuredClone(sumario)
     },
   }
 }

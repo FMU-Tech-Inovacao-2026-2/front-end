@@ -7,7 +7,7 @@ import { ApiProvider } from '../../api/ApiProvider'
 import type { ApiAlta } from '../../api/alta'
 import { AuthProvider } from '../../auth/AuthProvider'
 import type { ClienteAuth } from '../../auth/tipos'
-import { criarApiAltaFalsa, EXTRACAO_TESTE, PLANO_TESTE, TERMO_TESTE } from '../../test/altaFixtures'
+import { criarApiAltaFalsa, criarApisFalsas, EXTRACAO_TESTE, PLANO_TESTE, TERMO_TESTE } from '../../test/altaFixtures'
 
 function abrir(api: ApiAlta, caminho = '/alta/extracoes/extracao-teste') {
   const auth: ClienteAuth = {
@@ -18,7 +18,7 @@ function abrir(api: ApiAlta, caminho = '/alta/extracoes/extracao-teste') {
     tokenAtual: async () => 'token',
     sair: async () => undefined,
   }
-  render(<AuthProvider cliente={auth}><ApiProvider apis={{ alta: api }}><MemoryRouter initialEntries={[caminho]}><Rotas /></MemoryRouter></ApiProvider></AuthProvider>)
+  render(<AuthProvider cliente={auth}><ApiProvider apis={criarApisFalsas(api)}><MemoryRouter initialEntries={[caminho]}><Rotas /></MemoryRouter></ApiProvider></AuthProvider>)
 }
 
 function cartao(titulo: string) {
@@ -43,6 +43,10 @@ describe('Sugestões e aceite humano', () => {
 
     await usuario.click(screen.getByRole('button', { name: 'Aceitar as que têm origem confirmada' }))
     await usuario.click(within(cartao('Manter o curativo limpo e seco')).getByRole('button', { name: 'Reprovar' }))
+    // Salvaguarda G2: reprovar sem motivo não avança.
+    await usuario.click(screen.getByRole('button', { name: 'Ir para revisão final' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Informe o motivo da reprovação de: Manter o curativo limpo e seco')
+    await usuario.click(within(cartao('Manter o curativo limpo e seco')).getByRole('button', { name: 'Item duplicado' }))
     await usuario.click(within(cartao('Furosemida 40 mg')).getByRole('button', { name: 'Editar' }))
     await usuario.clear(screen.getByLabelText('Título'))
     await usuario.type(screen.getByLabelText('Título'), 'Medicamento revisado')
@@ -65,6 +69,7 @@ describe('Sugestões e aceite humano', () => {
     expect(aprovar).toHaveBeenCalledWith(EXTRACAO_TESTE.id, {
       itens_aprovados: ['sugestao-teste', 'sugestao-retorno', 'sugestao-alerta'],
       sugestoes_editadas: [{ id: 'sugestao-teste', titulo: 'Medicamento revisado', descricao: 'Via oral pela manhã por 7 dias.' }],
+      itens_reprovados: [{ id: 'sugestao-cuidado', motivo: 'Item duplicado' }],
       aceite: { versao_termo: TERMO_TESTE.versao, declaracoes: ['revisao_integral', 'ciente_limitacoes_ia'] },
     })
   })

@@ -6,7 +6,7 @@ import { ApiProvider } from '../../api/ApiProvider'
 import type { ApiAlta } from '../../api/alta'
 import { AuthProvider } from '../../auth/AuthProvider'
 import type { ClienteAuth } from '../../auth/tipos'
-import { criarApiAltaFalsa } from '../../test/altaFixtures'
+import { criarApiAltaFalsa, criarApisFalsas } from '../../test/altaFixtures'
 
 function abrir(api: ApiAlta) {
   const auth: ClienteAuth = {
@@ -17,7 +17,7 @@ function abrir(api: ApiAlta) {
     tokenAtual: async () => 'token-paciente',
     sair: async () => undefined,
   }
-  render(<AuthProvider cliente={auth}><ApiProvider apis={{ alta: api }}><MemoryRouter initialEntries={['/alta/meu-plano']}><Rotas /></MemoryRouter></ApiProvider></AuthProvider>)
+  render(<AuthProvider cliente={auth}><ApiProvider apis={criarApisFalsas(api)}><MemoryRouter initialEntries={['/alta/meu-plano']}><Rotas /></MemoryRouter></ApiProvider></AuthProvider>)
 }
 
 describe('Plano de cuidados do paciente', () => {
